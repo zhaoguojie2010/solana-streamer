@@ -54,7 +54,10 @@ async fn subscribe_meteora_dlmm_accounts() -> Result<(), Box<dyn std::error::Err
     use solana_streamer_sdk::streaming::event_parser::common::EventType;
     use solana_streamer_sdk::streaming::event_parser::common::filter::EventTypeFilter;
     let event_type_filter = Some(EventTypeFilter {
-        include: vec![EventType::AccountMeteoraDlmmLbPair],
+        include: vec![
+            EventType::AccountMeteoraDlmmLbPair,
+            EventType::AccountMeteoraDlmmBinArrayBitmapExtension,
+        ],
     });
 
     println!("开始监听事件，按 Ctrl+C 停止...");
@@ -88,29 +91,35 @@ async fn subscribe_meteora_dlmm_accounts() -> Result<(), Box<dyn std::error::Err
 
 fn create_event_callback() -> impl Fn(DexEvent) {
     |event: DexEvent| {
-        println!(
-            "🎉 事件接收! 类型: {:?}, slot: {:?}",
-            event.metadata().event_type,
-            event.metadata().slot
-        );
+        // println!(
+        //     "🎉 事件接收! 类型: {:?}, slot: {:?}",
+        //     event.metadata().event_type,
+        //     event.metadata().slot
+        // );
         match event {
-            DexEvent::MeteoraDlmmLbPairAccountEvent(e) => {
-                println!("=== Meteora DLMM LbPair 账户更新 ===");
+            // DexEvent::MeteoraDlmmLbPairAccountEvent(e) => {
+            //     println!("=== Meteora DLMM LbPair 账户更新 ===");
+            //     println!("账户地址: {}", e.pubkey);
+            //     println!("Token X Mint: {}", e.lb_pair.token_x_mint);
+            //     println!("Token Y Mint: {}", e.lb_pair.token_y_mint);
+            //     println!("Active ID: {}", e.lb_pair.active_id);
+            //     println!("Bin Step: {}", e.lb_pair.bin_step);
+            //     println!("Status: {}", e.lb_pair.status);
+            //     println!("Reserve X: {}", e.lb_pair.reserve_x);
+            //     println!("Reserve Y: {}", e.lb_pair.reserve_y);
+            //     println!("Protocol Fee X: {}", e.lb_pair.protocol_fee.amount_x);
+            //     println!("Protocol Fee Y: {}", e.lb_pair.protocol_fee.amount_y);
+            //     println!("Last Updated At: {}", e.lb_pair.last_updated_at);
+            //     println!("=====================================");
+            // }
+            DexEvent::MeteoraDlmmBinArrayBitmapExtensionAccountEvent(e) => {
+                println!("=== Meteora DLMM BinArrayBitmapExtension 账户更新 ===");
                 println!("账户地址: {}", e.pubkey);
-                println!("Token X Mint: {}", e.lb_pair.token_x_mint);
-                println!("Token Y Mint: {}", e.lb_pair.token_y_mint);
-                println!("Active ID: {}", e.lb_pair.active_id);
-                println!("Bin Step: {}", e.lb_pair.bin_step);
-                println!("Status: {}", e.lb_pair.status);
-                println!("Reserve X: {}", e.lb_pair.reserve_x);
-                println!("Reserve Y: {}", e.lb_pair.reserve_y);
-                println!("Protocol Fee X: {}", e.lb_pair.protocol_fee.amount_x);
-                println!("Protocol Fee Y: {}", e.lb_pair.protocol_fee.amount_y);
-                println!("Last Updated At: {}", e.lb_pair.last_updated_at);
+                println!("Bin Array Bitmap: {:?}", e.bin_array_bitmap_extension.positive_bin_array_bitmap);
                 println!("=====================================");
             }
             _ => {
-                println!("其他事件: {:?}", event);
+                //println!("其他事件: {:?}", event);
             }
         }
     }

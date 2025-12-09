@@ -5,7 +5,7 @@ use solana_sdk::pubkey::Pubkey;
 use crate::streaming::{
     event_parser::{
         common::{EventMetadata, EventType},
-        protocols::meteora_dlmm::MeteoraDlmmLbPairAccountEvent,
+        protocols::meteora_dlmm::{MeteoraDlmmBinArrayBitmapExtensionAccountEvent, MeteoraDlmmLbPairAccountEvent},
         DexEvent,
     },
     grpc::AccountPretty,
@@ -96,7 +96,16 @@ pub struct LbPair {
     pub reserved: [u8; 22],
 }
 
+#[repr(C)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, BorshDeserialize)]
+pub struct BinArrayBitmapExtension {
+    pub lb_pair: Pubkey,
+    pub positive_bin_array_bitmap: [[u64; 8]; 12],
+    pub negative_bin_array_bitmap: [[u64; 8]; 12],
+}
+
 pub const LB_PAIR_SIZE: usize = std::mem::size_of::<LbPair>();
+pub const BIN_ARRAY_BITMAP_EXTENSION_SIZE: usize = std::mem::size_of::<BinArrayBitmapExtension>();
 
 pub fn lb_pair_decode(data: &[u8]) -> Option<LbPair> {
     if data.len() < LB_PAIR_SIZE {
@@ -121,6 +130,36 @@ pub fn lb_pair_parser(account: &AccountPretty, mut metadata: EventMetadata) -> O
                 owner: account.owner,
                 rent_epoch: account.rent_epoch,
                 lb_pair,
+            },
+        ))
+    } else {
+        None
+    }
+}
+
+pub fn bin_array_bitmap_extension_decode(data: &[u8]) -> Option<BinArrayBitmapExtension> {
+    if data.len() < BIN_ARRAY_BITMAP_EXTENSION_SIZE {
+        return None;
+    }
+    borsh::from_slice::<BinArrayBitmapExtension>(&data[..BIN_ARRAY_BITMAP_EXTENSION_SIZE]).ok()
+}
+
+pub fn bin_array_bitmap_extension_parser(account: &AccountPretty, mut metadata: EventMetadata) -> Option<DexEvent> {
+    metadata.event_type = EventType::AccountMeteoraDlmmBinArrayBitmapExtension;
+
+    if account.data.len() < BIN_ARRAY_BITMAP_EXTENSION_SIZE + 8 {
+        return None;
+    }
+    if let Some(bin_array_bitmap_extension) = bin_array_bitmap_extension_decode(&account.data[8..BIN_ARRAY_BITMAP_EXTENSION_SIZE + 8]) {
+        Some(DexEvent::MeteoraDlmmBinArrayBitmapExtensionAccountEvent(
+            MeteoraDlmmBinArrayBitmapExtensionAccountEvent {
+                metadata,
+                pubkey: account.pubkey,
+                executable: account.executable,
+                lamports: account.lamports,
+                owner: account.owner,
+                rent_epoch: account.rent_epoch,
+                bin_array_bitmap_extension,
             },
         ))
     } else {
