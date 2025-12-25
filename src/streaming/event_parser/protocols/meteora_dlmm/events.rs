@@ -1,5 +1,5 @@
 use crate::streaming::event_parser::common::EventMetadata;
-use crate::streaming::event_parser::protocols::meteora_dlmm::types::{BinArrayBitmapExtension, LbPair};
+use crate::streaming::event_parser::protocols::meteora_dlmm::types::{BinArray, BinArrayBitmapExtension, LbPair};
 use serde::{Deserialize, Serialize};
 use solana_sdk::pubkey::Pubkey;
 
@@ -13,6 +13,18 @@ pub struct MeteoraDlmmLbPairAccountEvent {
     pub owner: Pubkey,
     pub rent_epoch: u64,
     pub lb_pair: LbPair,
+}
+
+/// BinArray 账户事件
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MeteoraDlmmBinArrayAccountEvent {
+    pub metadata: EventMetadata,
+    pub pubkey: Pubkey,
+    pub executable: bool,
+    pub lamports: u64,
+    pub owner: Pubkey,
+    pub rent_epoch: u64,
+    pub bin_array: BinArray,
 }
 
 /// BinArrayBitmapExtension 账户事件
@@ -31,5 +43,6 @@ pub struct MeteoraDlmmBinArrayBitmapExtensionAccountEvent {
 pub mod discriminators {
     // 账户鉴别器
     pub const LB_PAIR: &[u8] = &[33, 11, 49, 98, 181, 101, 177, 13];
+    pub const BIN_ARRAY: &[u8] = &[92, 142, 92, 220, 5, 148, 70, 181];
     pub const BIN_ARRAY_BITMAP_EXTENSION: &[u8] = &[80, 111, 124, 113, 55, 237, 18, 5];
 }

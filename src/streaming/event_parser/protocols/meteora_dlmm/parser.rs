@@ -20,6 +20,12 @@ pub fn parse_meteora_dlmm_account_data(
                 metadata,
             )
         }
+        discriminators::BIN_ARRAY => {
+            crate::streaming::event_parser::protocols::meteora_dlmm::types::bin_array_parser(
+                account,
+                metadata,
+            )
+        }
         discriminators::BIN_ARRAY_BITMAP_EXTENSION => {
             crate::streaming::event_parser::protocols::meteora_dlmm::types::bin_array_bitmap_extension_parser(
                 account,
