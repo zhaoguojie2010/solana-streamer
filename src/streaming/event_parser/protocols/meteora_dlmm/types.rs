@@ -107,7 +107,7 @@ pub struct BinArrayBitmapExtension {
 
 /// Bin 结构体 - 表示一个价格区间内的流动性
 #[repr(C)]
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Copy)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, BorshDeserialize, Copy)]
 pub struct Bin {
     /// Token X 的数量（已排除协议费用）
     pub amount_x: u64,
@@ -133,7 +133,7 @@ pub struct Bin {
 /// 例如：BinArray index: 0 包含 bin 0 <-> 599
 /// index: 2 包含 bin 600 <-> 1199, ...
 #[repr(C)]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BorshDeserialize)]
 pub struct BinArray {
     /// BinArray 的索引
     pub index: i64,
