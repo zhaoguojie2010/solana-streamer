@@ -12,10 +12,25 @@ use solana_sdk::pubkey::Pubkey;
 pub struct RaydiumCpmmSwapEvent {
     #[borsh(skip)]
     pub metadata: EventMetadata,
+    // 从指令参数解析
     pub amount_in: u64,
     pub minimum_amount_out: u64,
     pub max_amount_in: u64,
     pub amount_out: u64,
+    
+    // 从程序事件日志解析（如果可用）
+    pub input_vault_before: u64,
+    pub output_vault_before: u64,
+    pub input_amount: u64,
+    pub output_amount: u64,
+    pub input_transfer_fee: u64,
+    pub output_transfer_fee: u64,
+    pub base_input: bool,
+    pub trade_fee: u64,
+    pub creator_fee: u64,
+    pub creator_fee_on_input: bool,
+    
+    // 账户信息
     pub payer: Pubkey,
     pub authority: Pubkey,
     pub amm_config: Pubkey,
@@ -150,4 +165,11 @@ pub mod discriminators {
     // 账号鉴别器
     pub const AMM_CONFIG: &[u8] = &[218, 244, 33, 104, 203, 203, 43, 111];
     pub const POOL_STATE: &[u8] = &[247, 237, 227, 245, 215, 195, 222, 70];
+    
+    // Anchor 事件鉴别器 (通过 anchor_lang::event 生成)
+    // SwapEvent 的鉴别器是 anchor 事件名称的 discriminator
+    // 计算方式: anchor_lang::solana_program::hash::hash(b"event:SwapEvent").to_bytes()[..8]
+    // sha256("event:SwapEvent")[0..8]
+    pub const SWAP_EVENT: &[u8] = &[0x40, 0xc6, 0xcd, 0xe8, 0x26, 0x08, 0x71, 0xe2];
+    pub const LP_CHANGE_EVENT: &[u8] = &[0x9a, 0x0b, 0x0a, 0x7c, 0x7e, 0x5f, 0x7f, 0x3c];
 }

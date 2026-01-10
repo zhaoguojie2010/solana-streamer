@@ -1,7 +1,7 @@
 use solana_sdk::pubkey::Pubkey;
 
 use crate::streaming::event_parser::{
-    common::{read_u64_le, EventMetadata, EventType},
+    common::{read_u64_le, read_u8, EventMetadata, EventType},
     protocols::raydium_cpmm::{
         discriminators, RaydiumCpmmDepositEvent, RaydiumCpmmInitializeEvent, RaydiumCpmmSwapEvent,
         RaydiumCpmmWithdrawEvent,
@@ -12,6 +12,21 @@ use crate::streaming::event_parser::{
 /// Raydium CPMM程序ID
 pub const RAYDIUM_CPMM_PROGRAM_ID: Pubkey =
     solana_sdk::pubkey!("CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C");
+
+/// SwapEvent 从 Anchor 事件日志解析出来的数据
+#[derive(Debug, Clone, Default)]
+pub struct SwapEventLogData {
+    pub input_vault_before: u64,
+    pub output_vault_before: u64,
+    pub input_amount: u64,
+    pub output_amount: u64,
+    pub input_transfer_fee: u64,
+    pub output_transfer_fee: u64,
+    pub base_input: bool,
+    pub trade_fee: u64,
+    pub creator_fee: u64,
+    pub creator_fee_on_input: bool,
+}
 
 /// 解析 Raydium CPMM instruction data
 ///
@@ -241,4 +256,120 @@ fn parse_swap_base_output_instruction(
         observation_state: accounts[12],
         ..Default::default()
     }))
+}
+
+/// 从 Anchor 事件日志中解析 SwapEvent 数据
+///
+/// Anchor 事件日志格式: "Program data: <base64_encoded_event>"
+/// 事件数据格式: [8字节鉴别器] [事件数据]
+pub fn parse_swap_event_from_log(log_data_base64: &str) -> Option<SwapEventLogData> {
+    // 解码 base64
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    let decoded = STANDARD.decode(log_data_base64).ok()?;
+    
+    // 检查长度和鉴别器
+    if decoded.len() < 8 {
+        return None;
+    }
+    
+    // 验证鉴别器
+    if &decoded[0..8] != discriminators::SWAP_EVENT {
+        return None;
+    }
+    
+    // 解析事件数据
+    // SwapEvent 结构（从 raydium-cp-swap 源码）:
+    // - pool_id: Pubkey (32 bytes)
+    // - input_vault_before: u64 (8 bytes)
+    // - output_vault_before: u64 (8 bytes)
+    // - input_amount: u64 (8 bytes)
+    // - output_amount: u64 (8 bytes)
+    // - input_transfer_fee: u64 (8 bytes)
+    // - output_transfer_fee: u64 (8 bytes)
+    // - base_input: bool (1 byte)
+    // - input_mint: Pubkey (32 bytes)
+    // - output_mint: Pubkey (32 bytes)
+    // - trade_fee: u64 (8 bytes)
+    // - creator_fee: u64 (8 bytes)
+    // - creator_fee_on_input: bool (1 byte)
+    
+    let mut offset = 8 + 32; // 跳过鉴别器和 pool_id
+    
+    let input_vault_before = read_u64_le(&decoded, offset)?;
+    offset += 8;
+    
+    let output_vault_before = read_u64_le(&decoded, offset)?;
+    offset += 8;
+    
+    let input_amount = read_u64_le(&decoded, offset)?;
+    offset += 8;
+    
+    let output_amount = read_u64_le(&decoded, offset)?;
+    offset += 8;
+    
+    let input_transfer_fee = read_u64_le(&decoded, offset)?;
+    offset += 8;
+    
+    let output_transfer_fee = read_u64_le(&decoded, offset)?;
+    offset += 8;
+    
+    let base_input = read_u8(&decoded, offset)? != 0;
+    offset += 1;
+    
+    offset += 32; // 跳过 input_mint
+    offset += 32; // 跳过 output_mint
+    
+    let trade_fee = read_u64_le(&decoded, offset)?;
+    offset += 8;
+    
+    let creator_fee = read_u64_le(&decoded, offset)?;
+    offset += 8;
+    
+    let creator_fee_on_input = read_u8(&decoded, offset)? != 0;
+    
+    Some(SwapEventLogData {
+        input_vault_before,
+        output_vault_before,
+        input_amount,
+        output_amount,
+        input_transfer_fee,
+        output_transfer_fee,
+        base_input,
+        trade_fee,
+        creator_fee,
+        creator_fee_on_input,
+    })
+}
+
+/// 尝试从交易日志中提取 SwapEvent 数据
+///
+/// 这个函数可以在有日志数据可用时调用，用于增强 swap 事件的数据
+pub fn extract_swap_event_from_logs(logs: &[String], program_id: &Pubkey) -> Option<SwapEventLogData> {
+    const PROGRAM_DATA_PREFIX: &str = "Program data: ";
+    let program_id_str = program_id.to_string();
+    
+    // 寻找程序调用和对应的 Program data 日志
+    for (i, log) in logs.iter().enumerate() {
+        // 检查是否是程序调用
+        if log.contains(&program_id_str) && log.contains("invoke") {
+            // 在后续日志中查找 Program data
+            for j in i+1..logs.len() {
+                let data_log = &logs[j];
+                
+                // 如果遇到下一个程序调用，停止搜索
+                if data_log.contains("invoke") {
+                    break;
+                }
+                
+                // 尝试提取 Program data
+                if let Some(base64_data) = data_log.strip_prefix(PROGRAM_DATA_PREFIX) {
+                    if let Some(event_data) = parse_swap_event_from_log(base64_data) {
+                        return Some(event_data);
+                    }
+                }
+            }
+        }
+    }
+    
+    None
 }

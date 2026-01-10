@@ -52,9 +52,11 @@ impl EventParser {
                 let mut inner_instructions: Vec<
                     yellowstone_grpc_proto::solana::storage::confirmed_block::InnerInstructions,
                 > = vec![];
+                let mut log_messages: Vec<String> = vec![];
 
                 if let Some(meta) = grpc_tx.meta {
                     inner_instructions = meta.inner_instructions;
+                    log_messages = meta.log_messages;
                     address_table_lookups.reserve(
                         meta.loaded_writable_addresses.len() + meta.loaded_readonly_addresses.len(),
                     );
@@ -92,6 +94,7 @@ impl EventParser {
                     recv_us,
                     &accounts,
                     &inner_instructions,
+                    &log_messages,
                     bot_wallet,
                     transaction_index,
                     adapter_callback,
@@ -212,6 +215,7 @@ impl EventParser {
         recv_us: i64,
         accounts: &[Pubkey],
         inner_instructions: &[yellowstone_grpc_proto::prelude::InnerInstructions],
+        log_messages: &[String],
         bot_wallet: Option<Pubkey>,
         transaction_index: Option<u64>,
         callback: Arc<dyn for<'a> Fn(&'a DexEvent) + Send + Sync>,
@@ -250,6 +254,7 @@ impl EventParser {
                             bot_wallet,
                             transaction_index,
                             inner_instructions,
+                            log_messages,
                             callback.clone(),
                         )?;
                     }
@@ -280,6 +285,7 @@ impl EventParser {
                                 bot_wallet,
                                 transaction_index,
                                 Some(&inner_instructions),
+                                log_messages,
                                 callback.clone(),
                             )?;
                         }
@@ -309,6 +315,7 @@ impl EventParser {
         bot_wallet: Option<Pubkey>,
         transaction_index: Option<u64>,
         inner_instructions: Option<&yellowstone_grpc_proto::prelude::InnerInstructions>,
+        log_messages: &[String],
         callback: Arc<dyn for<'a> Fn(&'a DexEvent) + Send + Sync>,
     ) -> anyhow::Result<()> {
         // 添加边界检查以防止越界访问
@@ -387,6 +394,25 @@ impl EventParser {
             Some(e) => e,
             None => return Ok(()),
         };
+        
+        // 对于 Raydium CPMM swap 事件，尝试从日志中提取额外数据
+        if matches!(protocol, Protocol::RaydiumCpmm) {
+            if let DexEvent::RaydiumCpmmSwapEvent(ref mut swap_event) = event {
+                use crate::streaming::event_parser::protocols::raydium_cpmm::parser::extract_swap_event_from_logs;
+                if let Some(log_data) = extract_swap_event_from_logs(log_messages, &program_id) {
+                    swap_event.input_vault_before = log_data.input_vault_before;
+                    swap_event.output_vault_before = log_data.output_vault_before;
+                    swap_event.input_amount = log_data.input_amount;
+                    swap_event.output_amount = log_data.output_amount;
+                    swap_event.input_transfer_fee = log_data.input_transfer_fee;
+                    swap_event.output_transfer_fee = log_data.output_transfer_fee;
+                    swap_event.base_input = log_data.base_input;
+                    swap_event.trade_fee = log_data.trade_fee;
+                    swap_event.creator_fee = log_data.creator_fee;
+                    swap_event.creator_fee_on_input = log_data.creator_fee_on_input;
+                }
+            }
+        }
 
         // 处理 inner instructions
         let mut inner_instruction_event: Option<DexEvent> = None;
