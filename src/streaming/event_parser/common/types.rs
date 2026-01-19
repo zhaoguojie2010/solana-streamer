@@ -140,6 +140,7 @@ pub enum EventType {
     AccountMeteoraDlmmBinArray,
     AccountMeteoraDlmmBinArrayBitmapExtension,
     AccountWhirlpool,
+    AccountWhirlpoolTickArray,
 
     NonceAccount,
     TokenAccount,
@@ -171,6 +172,7 @@ pub const ACCOUNT_EVENT_TYPES: &[EventType] = &[
     EventType::AccountMeteoraDlmmBinArray,
     EventType::AccountMeteoraDlmmBinArrayBitmapExtension,
     EventType::AccountWhirlpool,
+    EventType::AccountWhirlpoolTickArray,
     EventType::TokenAccount,
     EventType::NonceAccount,
 ];
@@ -251,6 +253,7 @@ impl fmt::Display for EventType {
             EventType::AccountMeteoraDlmmBinArray => write!(f, "AccountMeteoraDlmmBinArray"),
             EventType::AccountMeteoraDlmmBinArrayBitmapExtension => write!(f, "AccountMeteoraDlmmBinArrayBitmapExtension"),
             EventType::AccountWhirlpool => write!(f, "AccountWhirlpool"),
+            EventType::AccountWhirlpoolTickArray => write!(f, "AccountWhirlpoolTickArray"),
             EventType::TokenAccount => write!(f, "TokenAccount"),
             EventType::NonceAccount => write!(f, "NonceAccount"),
             EventType::BlockMeta => write!(f, "BlockMeta"),

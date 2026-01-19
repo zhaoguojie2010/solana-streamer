@@ -5,7 +5,7 @@ use solana_sdk::pubkey::Pubkey;
 use crate::streaming::{
     event_parser::{
         common::{EventMetadata, EventType},
-        protocols::whirlpool::WhirlpoolAccountEvent,
+        protocols::whirlpool::{WhirlpoolAccountEvent, WhirlpoolTickArrayAccountEvent},
         DexEvent,
     },
     grpc::AccountPretty,
@@ -13,6 +13,11 @@ use crate::streaming::{
 
 // Number of rewards supported by Whirlpools
 pub const NUM_REWARDS: usize = 3;
+pub const WHIRLPOOL_TICK_ARRAY_LEN: usize = 88;
+
+pub const WHIRLPOOL_TICK_SIZE: usize = 1 + 16 + 16 + 16 + 16 + (NUM_REWARDS * 16);
+pub const WHIRLPOOL_TICK_ARRAY_SIZE: usize =
+    32 + 4 + (WHIRLPOOL_TICK_ARRAY_LEN * WHIRLPOOL_TICK_SIZE);
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, BorshDeserialize)]
 pub struct WhirlpoolRewardInfo {
@@ -50,6 +55,34 @@ pub struct Whirlpool {
     pub fee_growth_global_b: u128,
     pub reward_last_updated_timestamp: u64,
     pub reward_infos: [WhirlpoolRewardInfo; NUM_REWARDS],
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, BorshDeserialize)]
+pub struct WhirlpoolTick {
+    pub initialized: bool,
+    pub liquidity_net: i128,
+    pub liquidity_gross: u128,
+    pub fee_growth_outside_a: u128,
+    pub fee_growth_outside_b: u128,
+    pub reward_growths_outside: [u128; NUM_REWARDS],
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BorshDeserialize)]
+pub struct WhirlpoolTickArray {
+    pub start_tick_index: i32,
+    #[serde(with = "serde_big_array::BigArray")]
+    pub ticks: [WhirlpoolTick; WHIRLPOOL_TICK_ARRAY_LEN],
+    pub whirlpool: Pubkey,
+}
+
+impl Default for WhirlpoolTickArray {
+    fn default() -> Self {
+        Self {
+            start_tick_index: 0,
+            ticks: core::array::from_fn(|_| WhirlpoolTick::default()),
+            whirlpool: Pubkey::default(),
+        }
+    }
 }
 
 // Whirlpool::LEN = 8 (discriminator) + 261 + 384 = 653
@@ -283,6 +316,53 @@ pub fn whirlpool_parser(account: &AccountPretty, mut metadata: EventMetadata) ->
     } else {
         log::warn!(
             "Whirlpool 账户数据解析失败: pubkey={}, 数据长度={}",
+            account.pubkey,
+            account.data.len()
+        );
+        None
+    }
+}
+
+pub fn whirlpool_tick_array_decode(data: &[u8]) -> Option<WhirlpoolTickArray> {
+    if data.len() < WHIRLPOOL_TICK_ARRAY_SIZE {
+        return None;
+    }
+    borsh::from_slice::<WhirlpoolTickArray>(&data[..WHIRLPOOL_TICK_ARRAY_SIZE]).ok()
+}
+
+pub fn whirlpool_tick_array_parser(
+    account: &AccountPretty,
+    mut metadata: EventMetadata,
+) -> Option<DexEvent> {
+    metadata.event_type = EventType::AccountWhirlpoolTickArray;
+
+    let expected_size = 8 + WHIRLPOOL_TICK_ARRAY_SIZE;
+    if account.data.len() < expected_size {
+        log::warn!(
+            "Whirlpool TickArray 账户数据长度不足: 需要至少 {} 字节，实际 {} 字节",
+            expected_size,
+            account.data.len()
+        );
+        return None;
+    }
+
+    if let Some(tick_array) =
+        whirlpool_tick_array_decode(&account.data[8..8 + WHIRLPOOL_TICK_ARRAY_SIZE])
+    {
+        Some(DexEvent::WhirlpoolTickArrayAccountEvent(
+            WhirlpoolTickArrayAccountEvent {
+                metadata,
+                pubkey: account.pubkey,
+                executable: account.executable,
+                lamports: account.lamports,
+                owner: account.owner,
+                rent_epoch: account.rent_epoch,
+                tick_array,
+            },
+        ))
+    } else {
+        log::warn!(
+            "Whirlpool TickArray 账户数据解析失败: pubkey={}, 数据长度={}",
             account.pubkey,
             account.data.len()
         );

@@ -20,6 +20,12 @@ pub fn parse_whirlpool_account_data(
                 metadata,
             )
         }
+        discriminators::TICK_ARRAY => {
+            crate::streaming::event_parser::protocols::whirlpool::types::whirlpool_tick_array_parser(
+                account,
+                metadata,
+            )
+        }
         _ => None,
     }
 }

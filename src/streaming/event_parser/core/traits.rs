@@ -91,6 +91,7 @@ pub enum DexEvent {
 
     // Whirlpool events
     WhirlpoolAccountEvent(WhirlpoolAccountEvent),
+    WhirlpoolTickArrayAccountEvent(WhirlpoolTickArrayAccountEvent),
 
     // Common events
     TokenAccountEvent(TokenAccountEvent),
@@ -157,6 +158,7 @@ impl DexEvent {
             DexEvent::MeteoraDlmmBinArrayAccountEvent(e) => &e.metadata,
             DexEvent::MeteoraDlmmBinArrayBitmapExtensionAccountEvent(e) => &e.metadata,
             DexEvent::WhirlpoolAccountEvent(e) => &e.metadata,
+            DexEvent::WhirlpoolTickArrayAccountEvent(e) => &e.metadata,
             DexEvent::TokenAccountEvent(e) => &e.metadata,
             DexEvent::NonceAccountEvent(e) => &e.metadata,
             DexEvent::TokenInfoEvent(e) => &e.metadata,
@@ -221,6 +223,7 @@ impl DexEvent {
             DexEvent::MeteoraDlmmBinArrayAccountEvent(e) => &mut e.metadata,
             DexEvent::MeteoraDlmmBinArrayBitmapExtensionAccountEvent(e) => &mut e.metadata,
             DexEvent::WhirlpoolAccountEvent(e) => &mut e.metadata,
+            DexEvent::WhirlpoolTickArrayAccountEvent(e) => &mut e.metadata,
             DexEvent::TokenAccountEvent(e) => &mut e.metadata,
             DexEvent::NonceAccountEvent(e) => &mut e.metadata,
             DexEvent::TokenInfoEvent(e) => &mut e.metadata,
