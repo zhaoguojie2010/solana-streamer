@@ -399,7 +399,14 @@ impl EventParser {
         if matches!(protocol, Protocol::RaydiumCpmm) {
             if let DexEvent::RaydiumCpmmSwapEvent(ref mut swap_event) = event {
                 use crate::streaming::event_parser::protocols::raydium_cpmm::parser::extract_swap_event_from_logs;
-                if let Some(log_data) = extract_swap_event_from_logs(log_messages, &program_id) {
+                if let Some(log_data) =
+                    extract_swap_event_from_logs(
+                        log_messages,
+                        &program_id,
+                        &swap_event.pool_state,
+                        &swap_event.metadata.signature,
+                    )
+                {
                     swap_event.input_vault_before = log_data.input_vault_before;
                     swap_event.output_vault_before = log_data.output_vault_before;
                     swap_event.input_amount = log_data.input_amount;

@@ -16,6 +16,7 @@ pub const RAYDIUM_CPMM_PROGRAM_ID: Pubkey =
 /// SwapEvent 从 Anchor 事件日志解析出来的数据
 #[derive(Debug, Clone, Default)]
 pub struct SwapEventLogData {
+    pub pool_id: Pubkey,
     pub input_vault_before: u64,
     pub output_vault_before: u64,
     pub input_amount: u64,
@@ -293,6 +294,7 @@ pub fn parse_swap_event_from_log(log_data_base64: &str) -> Option<SwapEventLogDa
     // - creator_fee: u64 (8 bytes)
     // - creator_fee_on_input: bool (1 byte)
     
+    let pool_id = Pubkey::new_from_array(decoded.get(8..40)?.try_into().ok()?);
     let mut offset = 8 + 32; // 跳过鉴别器和 pool_id
     
     let input_vault_before = read_u64_le(&decoded, offset)?;
@@ -328,6 +330,7 @@ pub fn parse_swap_event_from_log(log_data_base64: &str) -> Option<SwapEventLogDa
     let creator_fee_on_input = read_u8(&decoded, offset)? != 0;
     
     Some(SwapEventLogData {
+        pool_id,
         input_vault_before,
         output_vault_before,
         input_amount,
@@ -344,7 +347,12 @@ pub fn parse_swap_event_from_log(log_data_base64: &str) -> Option<SwapEventLogDa
 /// 尝试从交易日志中提取 SwapEvent 数据
 ///
 /// 这个函数可以在有日志数据可用时调用，用于增强 swap 事件的数据
-pub fn extract_swap_event_from_logs(logs: &[String], program_id: &Pubkey) -> Option<SwapEventLogData> {
+pub fn extract_swap_event_from_logs(
+    logs: &[String],
+    program_id: &Pubkey,
+    expected_pool_id: &Pubkey,
+    signature: &solana_sdk::signature::Signature,
+) -> Option<SwapEventLogData> {
     const PROGRAM_DATA_PREFIX: &str = "Program data: ";
     let program_id_str = program_id.to_string();
     
@@ -364,7 +372,15 @@ pub fn extract_swap_event_from_logs(logs: &[String], program_id: &Pubkey) -> Opt
                 // 尝试提取 Program data
                 if let Some(base64_data) = data_log.strip_prefix(PROGRAM_DATA_PREFIX) {
                     if let Some(event_data) = parse_swap_event_from_log(base64_data) {
-                        return Some(event_data);
+                        if &event_data.pool_id == expected_pool_id {
+                            return Some(event_data);
+                        }
+                        log::debug!(
+                            "Raydium CPMM swap log pool mismatch, skip log_data: sig={}, expected_pool={}, log_pool={}",
+                            signature,
+                            expected_pool_id,
+                            event_data.pool_id
+                        );
                     }
                 }
             }
