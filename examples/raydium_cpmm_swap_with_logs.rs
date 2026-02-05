@@ -1,14 +1,10 @@
-use solana_streamer_sdk::streaming::event_parser::protocols::raydium_cpmm::parser::{
-    extract_swap_event_from_logs, RAYDIUM_CPMM_PROGRAM_ID,
-};
+use solana_streamer_sdk::streaming::event_parser::protocols::raydium_cpmm::parser::RAYDIUM_CPMM_PROGRAM_ID;
 use solana_streamer_sdk::streaming::event_parser::{DexEvent, Protocol};
 use solana_streamer_sdk::streaming::{
-    event_parser::core::event_parser::EventParser,
     grpc::ClientConfig,
-    yellowstone_grpc::{AccountFilter, TransactionFilter},
+    yellowstone_grpc::TransactionFilter,
     YellowstoneGrpc,
 };
-use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -127,4 +123,3 @@ fn create_event_callback() -> impl Fn(DexEvent) {
         }
     }
 }
-

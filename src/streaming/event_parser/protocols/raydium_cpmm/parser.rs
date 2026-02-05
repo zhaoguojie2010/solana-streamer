@@ -1,7 +1,7 @@
 use solana_sdk::pubkey::Pubkey;
 
 use crate::streaming::event_parser::{
-    common::{read_u64_le, read_u8, EventMetadata, EventType},
+    common::{read_u64_le, read_u8, EventMetadata, EventType, ProgramDataItem},
     protocols::raydium_cpmm::{
         discriminators, RaydiumCpmmDepositEvent, RaydiumCpmmInitializeEvent, RaydiumCpmmSwapEvent,
         RaydiumCpmmWithdrawEvent,
@@ -50,6 +50,13 @@ pub fn parse_raydium_cpmm_instruction_data(
         discriminators::WITHDRAW => parse_withdraw_instruction(data, accounts, metadata),
         _ => None,
     }
+}
+
+pub fn is_raydium_cpmm_swap_instruction(discriminator: &[u8]) -> bool {
+    matches!(
+        discriminator,
+        discriminators::SWAP_BASE_IN | discriminators::SWAP_BASE_OUT
+    )
 }
 
 /// 解析 Raydium CPMM inner instruction data
@@ -344,48 +351,17 @@ pub fn parse_swap_event_from_log(log_data_base64: &str) -> Option<SwapEventLogDa
     })
 }
 
-/// 尝试从交易日志中提取 SwapEvent 数据
-///
-/// 这个函数可以在有日志数据可用时调用，用于增强 swap 事件的数据
-pub fn extract_swap_event_from_logs(
-    logs: &[String],
-    program_id: &Pubkey,
+/// 从 ProgramDataItem 解析 SwapEvent 数据
+pub fn parse_swap_event_from_program_data(
+    item: &ProgramDataItem,
     expected_pool_id: &Pubkey,
-    signature: &solana_sdk::signature::Signature,
 ) -> Option<SwapEventLogData> {
-    const PROGRAM_DATA_PREFIX: &str = "Program data: ";
-    let program_id_str = program_id.to_string();
-    
-    // 寻找程序调用和对应的 Program data 日志
-    for (i, log) in logs.iter().enumerate() {
-        // 检查是否是程序调用
-        if log.contains(&program_id_str) && log.contains("invoke") {
-            // 在后续日志中查找 Program data
-            for j in i+1..logs.len() {
-                let data_log = &logs[j];
-                
-                // 如果遇到下一个程序调用，停止搜索
-                if data_log.contains("invoke") {
-                    break;
-                }
-                
-                // 尝试提取 Program data
-                if let Some(base64_data) = data_log.strip_prefix(PROGRAM_DATA_PREFIX) {
-                    if let Some(event_data) = parse_swap_event_from_log(base64_data) {
-                        if &event_data.pool_id == expected_pool_id {
-                            return Some(event_data);
-                        }
-                        log::debug!(
-                            "Raydium CPMM swap log pool mismatch, skip log_data: sig={}, expected_pool={}, log_pool={}",
-                            signature,
-                            expected_pool_id,
-                            event_data.pool_id
-                        );
-                    }
-                }
-            }
-        }
+    if item.program_id != RAYDIUM_CPMM_PROGRAM_ID {
+        return None;
     }
-    
-    None
+    let event_data = parse_swap_event_from_log(&item.base64)?;
+    if &event_data.pool_id != expected_pool_id {
+        return None;
+    }
+    Some(event_data)
 }

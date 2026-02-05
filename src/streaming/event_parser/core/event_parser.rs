@@ -1,6 +1,9 @@
 use crate::streaming::event_parser::{
-    DexEvent, Protocol, common::{
-        EventMetadata, filter::EventTypeFilter, high_performance_clock::elapsed_micros_since, parse_swap_data_from_next_grpc_instructions, parse_swap_data_from_next_instructions
+    DexEvent, Protocol,
+    common::{
+        EventMetadata, ProgramDataIndex, build_program_data_index,
+        filter::EventTypeFilter, high_performance_clock::elapsed_micros_since,
+        parse_swap_data_from_next_grpc_instructions, parse_swap_data_from_next_instructions
     }, core::{
         dispatcher::EventDispatcher,
         global_state::{
@@ -214,7 +217,7 @@ impl EventParser {
         block_time: Option<Timestamp>,
         recv_us: i64,
         accounts: &[Pubkey],
-        inner_instructions: &[yellowstone_grpc_proto::prelude::InnerInstructions],
+        all_inner_instructions: &[yellowstone_grpc_proto::prelude::InnerInstructions],
         log_messages: &[String],
         bot_wallet: Option<Pubkey>,
         transaction_index: Option<u64>,
@@ -228,10 +231,25 @@ impl EventParser {
             .any(|account| Self::should_handle(protocols, event_type_filter, account));
         if has_program {
             // 解析每个指令
+            let mut program_data_index: Option<ProgramDataIndex> = None;
             for (index, instruction) in compiled_instructions.iter().enumerate() {
                 if let Some(program_id) = accounts.get(instruction.program_id_index as usize) {
                     let program_id = *program_id; // 克隆程序ID，避免借用冲突
-                    let inner_instructions = inner_instructions
+                    if program_data_index.is_none() && !log_messages.is_empty() {
+                        if let Some(protocol) =
+                            EventDispatcher::match_protocol_by_program_id(&program_id)
+                        {
+                            if Self::instruction_needs_program_data(&protocol, &instruction.data)
+                            {
+                                program_data_index = Some(build_program_data_index(
+                                    log_messages,
+                                    compiled_instructions.len(),
+                                    all_inner_instructions,
+                                ));
+                            }
+                        }
+                    }
+                    let inner_instructions = all_inner_instructions
                         .iter()
                         .find(|inner_instruction| inner_instruction.index == index as u32);
                     let max_idx = instruction.accounts.iter().max().unwrap_or(&0);
@@ -254,7 +272,7 @@ impl EventParser {
                             bot_wallet,
                             transaction_index,
                             inner_instructions,
-                            log_messages,
+                            program_data_index.as_ref(),
                             callback.clone(),
                         )?;
                     }
@@ -271,6 +289,26 @@ impl EventParser {
                                     accounts: inner_accounts.to_vec(),
                                     data: data.to_vec(),
                                 };
+                            if program_data_index.is_none() && !log_messages.is_empty() {
+                                if let Some(program_id) =
+                                    accounts.get(instruction.program_id_index as usize)
+                                {
+                                    if let Some(protocol) =
+                                        EventDispatcher::match_protocol_by_program_id(program_id)
+                                    {
+                                        if Self::instruction_needs_program_data(
+                                            &protocol,
+                                            &instruction.data,
+                                        ) {
+                                            program_data_index = Some(build_program_data_index(
+                                                log_messages,
+                                                compiled_instructions.len(),
+                                                all_inner_instructions,
+                                            ));
+                                        }
+                                    }
+                                }
+                            }
                             Self::parse_events_from_grpc_instruction(
                                 protocols,
                                 event_type_filter,
@@ -285,7 +323,7 @@ impl EventParser {
                                 bot_wallet,
                                 transaction_index,
                                 Some(&inner_instructions),
-                                log_messages,
+                                program_data_index.as_ref(),
                                 callback.clone(),
                             )?;
                         }
@@ -315,7 +353,7 @@ impl EventParser {
         bot_wallet: Option<Pubkey>,
         transaction_index: Option<u64>,
         inner_instructions: Option<&yellowstone_grpc_proto::prelude::InnerInstructions>,
-        log_messages: &[String],
+        program_data_index: Option<&ProgramDataIndex>,
         callback: Arc<dyn for<'a> Fn(&'a DexEvent) + Send + Sync>,
     ) -> anyhow::Result<()> {
         // 添加边界检查以防止越界访问
@@ -398,25 +436,29 @@ impl EventParser {
         // 对于 Raydium CPMM swap 事件，尝试从日志中提取额外数据
         if matches!(protocol, Protocol::RaydiumCpmm) {
             if let DexEvent::RaydiumCpmmSwapEvent(ref mut swap_event) = event {
-                use crate::streaming::event_parser::protocols::raydium_cpmm::parser::extract_swap_event_from_logs;
-                if let Some(log_data) =
-                    extract_swap_event_from_logs(
-                        log_messages,
-                        &program_id,
-                        &swap_event.pool_state,
-                        &swap_event.metadata.signature,
-                    )
-                {
-                    swap_event.input_vault_before = log_data.input_vault_before;
-                    swap_event.output_vault_before = log_data.output_vault_before;
-                    swap_event.input_amount = log_data.input_amount;
-                    swap_event.output_amount = log_data.output_amount;
-                    swap_event.input_transfer_fee = log_data.input_transfer_fee;
-                    swap_event.output_transfer_fee = log_data.output_transfer_fee;
-                    swap_event.base_input = log_data.base_input;
-                    swap_event.trade_fee = log_data.trade_fee;
-                    swap_event.creator_fee = log_data.creator_fee;
-                    swap_event.creator_fee_on_input = log_data.creator_fee_on_input;
+                if let Some(program_data_index) = program_data_index {
+                    use crate::streaming::event_parser::protocols::raydium_cpmm::parser::parse_swap_event_from_program_data;
+                    let item = if let Some(inner_index) = inner_index {
+                        program_data_index.get_inner(outer_index, inner_index)
+                    } else {
+                        program_data_index.get_outer(outer_index)
+                    };
+                    if let Some(item) = item {
+                        if let Some(log_data) =
+                            parse_swap_event_from_program_data(item, &swap_event.pool_state)
+                        {
+                            swap_event.input_vault_before = log_data.input_vault_before;
+                            swap_event.output_vault_before = log_data.output_vault_before;
+                            swap_event.input_amount = log_data.input_amount;
+                            swap_event.output_amount = log_data.output_amount;
+                            swap_event.input_transfer_fee = log_data.input_transfer_fee;
+                            swap_event.output_transfer_fee = log_data.output_transfer_fee;
+                            swap_event.base_input = log_data.base_input;
+                            swap_event.trade_fee = log_data.trade_fee;
+                            swap_event.creator_fee = log_data.creator_fee;
+                            swap_event.creator_fee_on_input = log_data.creator_fee_on_input;
+                        }
+                    }
                 }
             }
         }
@@ -426,8 +468,14 @@ impl EventParser {
         if let Some(inner_instructions_ref) = inner_instructions {
             // 并行执行两个任务: 解析 inner event 和提取 swap_data
             let (inner_event_result, swap_data_result) = std::thread::scope(|s| {
-                let inner_event_handle = s.spawn(|| {
-                    for inner_instruction in inner_instructions_ref.instructions.iter() {
+                let start_idx = inner_index
+                    .and_then(|i| if i >= 0 { Some((i as usize).saturating_add(1)) } else { None })
+                    .unwrap_or(0);
+                let protocol_for_inner = protocol.clone();
+                let inner_event_handle = s.spawn(move || {
+                    for inner_instruction in
+                        inner_instructions_ref.instructions.iter().skip(start_idx)
+                    {
                         let inner_data = &inner_instruction.data;
                         // 检查长度（需要 16 字节的 discriminator）
                         if inner_data.len() < 16 {
@@ -437,7 +485,7 @@ impl EventParser {
                         let inner_instruction_data = &inner_data[16..];
 
                         if let Some(inner_event) = EventDispatcher::dispatch_inner_instruction(
-                            protocol.clone(),
+                            protocol_for_inner.clone(),
                             inner_discriminator,
                             inner_instruction_data,
                             metadata.clone(),
@@ -601,8 +649,14 @@ impl EventParser {
         if let Some(inner_instructions_ref) = inner_instructions {
             // 并行执行两个任务: 解析 inner event 和提取 swap_data
             let (inner_event_result, swap_data_result) = std::thread::scope(|s| {
-                let inner_event_handle = s.spawn(|| {
-                    for inner_instruction in inner_instructions_ref.instructions.iter() {
+                let start_idx = inner_index
+                    .and_then(|i| if i >= 0 { Some((i as usize).saturating_add(1)) } else { None })
+                    .unwrap_or(0);
+                let protocol_for_inner = protocol.clone();
+                let inner_event_handle = s.spawn(move || {
+                    for inner_instruction in
+                        inner_instructions_ref.instructions.iter().skip(start_idx)
+                    {
                         let inner_data = &inner_instruction.instruction.data;
                         // 检查长度（需要 16 字节的 discriminator）
                         if inner_data.len() < 16 {
@@ -612,7 +666,7 @@ impl EventParser {
                         let inner_instruction_data = &inner_data[16..];
 
                         if let Some(inner_event) = EventDispatcher::dispatch_inner_instruction(
-                            protocol.clone(),
+                            protocol_for_inner.clone(),
                             inner_discriminator,
                             inner_instruction_data,
                             metadata.clone(),
@@ -687,6 +741,20 @@ impl EventParser {
             return true;
         } else {
             false
+        }
+    }
+
+    fn instruction_needs_program_data(protocol: &Protocol, data: &[u8]) -> bool {
+        match protocol {
+            Protocol::RaydiumCpmm => {
+                if data.len() < 8 {
+                    return false;
+                }
+                crate::streaming::event_parser::protocols::raydium_cpmm::parser::is_raydium_cpmm_swap_instruction(
+                    &data[..8],
+                )
+            }
+            _ => false,
         }
     }
 
