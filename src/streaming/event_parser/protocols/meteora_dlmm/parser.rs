@@ -10,7 +10,7 @@ pub const METEORA_DLMM_PROGRAM_ID: Pubkey =
 /// 根据判别器路由到具体的账户解析函数
 pub fn parse_meteora_dlmm_account_data(
     discriminator: &[u8],
-    account: &crate::streaming::grpc::AccountPretty,
+    account: crate::streaming::grpc::AccountPretty,
     metadata: crate::streaming::event_parser::common::EventMetadata,
 ) -> Option<crate::streaming::event_parser::DexEvent> {
     match discriminator {

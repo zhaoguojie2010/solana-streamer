@@ -35,7 +35,7 @@ pub fn global_config_decode(data: &[u8]) -> Option<GlobalConfig> {
 }
 
 pub fn global_config_parser(
-    account: &AccountPretty,
+    account: AccountPretty,
     mut metadata: EventMetadata,
 ) -> Option<DexEvent> {
     metadata.event_type = EventType::AccountPumpSwapGlobalConfig;
@@ -51,6 +51,7 @@ pub fn global_config_parser(
             lamports: account.lamports,
             owner: account.owner,
             rent_epoch: account.rent_epoch,
+            raw_account_data: account.data,
             global_config: config,
         }))
     } else {
@@ -82,7 +83,7 @@ pub fn pool_decode(data: &[u8]) -> Option<Pool> {
     borsh::from_slice::<Pool>(&data[..POOL_SIZE]).ok()
 }
 
-pub fn pool_parser(account: &AccountPretty, mut metadata: EventMetadata) -> Option<DexEvent> {
+pub fn pool_parser(account: AccountPretty, mut metadata: EventMetadata) -> Option<DexEvent> {
     metadata.event_type = EventType::AccountPumpSwapPool;
 
     if account.data.len() < POOL_SIZE + 8 {
@@ -96,6 +97,7 @@ pub fn pool_parser(account: &AccountPretty, mut metadata: EventMetadata) -> Opti
             lamports: account.lamports,
             owner: account.owner,
             rent_epoch: account.rent_epoch,
+            raw_account_data: account.data,
             pool: pool,
         }))
     } else {

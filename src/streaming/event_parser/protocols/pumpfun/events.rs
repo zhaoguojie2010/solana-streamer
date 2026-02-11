@@ -333,6 +333,9 @@ pub struct PumpFunBondingCurveAccountEvent {
     pub lamports: u64,
     pub owner: Pubkey,
     pub rent_epoch: u64,
+    #[borsh(skip)]
+    #[serde(skip)]
+    pub raw_account_data: Vec<u8>,
     pub bonding_curve: BondingCurve,
 }
 
@@ -346,6 +349,9 @@ pub struct PumpFunGlobalAccountEvent {
     pub lamports: u64,
     pub owner: Pubkey,
     pub rent_epoch: u64,
+    #[borsh(skip)]
+    #[serde(skip)]
+    pub raw_account_data: Vec<u8>,
     pub global: Global,
 }
 

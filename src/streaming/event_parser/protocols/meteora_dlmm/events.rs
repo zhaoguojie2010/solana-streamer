@@ -12,6 +12,8 @@ pub struct MeteoraDlmmLbPairAccountEvent {
     pub lamports: u64,
     pub owner: Pubkey,
     pub rent_epoch: u64,
+    #[serde(skip)]
+    pub raw_account_data: Vec<u8>,
     pub lb_pair: LbPair,
 }
 
@@ -24,6 +26,8 @@ pub struct MeteoraDlmmBinArrayAccountEvent {
     pub lamports: u64,
     pub owner: Pubkey,
     pub rent_epoch: u64,
+    #[serde(skip)]
+    pub raw_account_data: Vec<u8>,
     pub bin_array: BinArray,
 }
 
@@ -36,6 +40,8 @@ pub struct MeteoraDlmmBinArrayBitmapExtensionAccountEvent {
     pub lamports: u64,
     pub owner: Pubkey,
     pub rent_epoch: u64,
+    #[serde(skip)]
+    pub raw_account_data: Vec<u8>,
     pub bin_array_bitmap_extension: BinArrayBitmapExtension,
 }
 

@@ -236,6 +236,8 @@ pub struct BonkPoolStateAccountEvent {
     pub lamports: u64,
     pub owner: Pubkey,
     pub rent_epoch: u64,
+    #[serde(skip)]
+    pub raw_account_data: Vec<u8>,
     pub pool_state: PoolState,
 }
 
@@ -248,6 +250,8 @@ pub struct BonkGlobalConfigAccountEvent {
     pub lamports: u64,
     pub owner: Pubkey,
     pub rent_epoch: u64,
+    #[serde(skip)]
+    pub raw_account_data: Vec<u8>,
     pub global_config: GlobalConfig,
 }
 
@@ -260,6 +264,8 @@ pub struct BonkPlatformConfigAccountEvent {
     pub lamports: u64,
     pub owner: Pubkey,
     pub rent_epoch: u64,
+    #[serde(skip)]
+    pub raw_account_data: Vec<u8>,
     pub platform_config: PlatformConfig,
 }
 

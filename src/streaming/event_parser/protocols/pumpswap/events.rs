@@ -252,6 +252,9 @@ pub struct PumpSwapGlobalConfigAccountEvent {
     pub lamports: u64,
     pub owner: Pubkey,
     pub rent_epoch: u64,
+    #[borsh(skip)]
+    #[serde(skip)]
+    pub raw_account_data: Vec<u8>,
     pub global_config: GlobalConfig,
 }
 
@@ -265,6 +268,9 @@ pub struct PumpSwapPoolAccountEvent {
     pub lamports: u64,
     pub owner: Pubkey,
     pub rent_epoch: u64,
+    #[borsh(skip)]
+    #[serde(skip)]
+    pub raw_account_data: Vec<u8>,
     pub pool: Pool,
 }
 

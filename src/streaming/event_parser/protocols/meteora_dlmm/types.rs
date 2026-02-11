@@ -172,7 +172,7 @@ pub fn lb_pair_decode(data: &[u8]) -> Option<LbPair> {
     borsh::from_slice::<LbPair>(&data[..LB_PAIR_SIZE]).ok()
 }
 
-pub fn lb_pair_parser(account: &AccountPretty, mut metadata: EventMetadata) -> Option<DexEvent> {
+pub fn lb_pair_parser(account: AccountPretty, mut metadata: EventMetadata) -> Option<DexEvent> {
     metadata.event_type = EventType::AccountMeteoraDlmmLbPair;
 
     if account.data.len() < LB_PAIR_SIZE + 8 {
@@ -187,6 +187,7 @@ pub fn lb_pair_parser(account: &AccountPretty, mut metadata: EventMetadata) -> O
                 lamports: account.lamports,
                 owner: account.owner,
                 rent_epoch: account.rent_epoch,
+                raw_account_data: account.data,
                 lb_pair,
             },
         ))
@@ -202,7 +203,7 @@ pub fn bin_array_bitmap_extension_decode(data: &[u8]) -> Option<BinArrayBitmapEx
     borsh::from_slice::<BinArrayBitmapExtension>(&data[..BIN_ARRAY_BITMAP_EXTENSION_SIZE]).ok()
 }
 
-pub fn bin_array_bitmap_extension_parser(account: &AccountPretty, mut metadata: EventMetadata) -> Option<DexEvent> {
+pub fn bin_array_bitmap_extension_parser(account: AccountPretty, mut metadata: EventMetadata) -> Option<DexEvent> {
     metadata.event_type = EventType::AccountMeteoraDlmmBinArrayBitmapExtension;
 
     if account.data.len() < BIN_ARRAY_BITMAP_EXTENSION_SIZE + 8 {
@@ -217,6 +218,7 @@ pub fn bin_array_bitmap_extension_parser(account: &AccountPretty, mut metadata: 
                 lamports: account.lamports,
                 owner: account.owner,
                 rent_epoch: account.rent_epoch,
+                raw_account_data: account.data,
                 bin_array_bitmap_extension,
             },
         ))
@@ -291,7 +293,7 @@ pub fn bin_array_decode(data: &[u8]) -> Option<BinArray> {
     })
 }
 
-pub fn bin_array_parser(account: &AccountPretty, mut metadata: EventMetadata) -> Option<DexEvent> {
+pub fn bin_array_parser(account: AccountPretty, mut metadata: EventMetadata) -> Option<DexEvent> {
     metadata.event_type = EventType::AccountMeteoraDlmmBinArray;
 
     // 跳过前 8 字节的 discriminator
@@ -307,6 +309,7 @@ pub fn bin_array_parser(account: &AccountPretty, mut metadata: EventMetadata) ->
                 lamports: account.lamports,
                 owner: account.owner,
                 rent_epoch: account.rent_epoch,
+                raw_account_data: account.data,
                 bin_array,
             },
         ))

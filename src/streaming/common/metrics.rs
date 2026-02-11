@@ -378,13 +378,13 @@ impl MetricsManager {
         let adjusted_latency_ms = recv_ms - (block_time_ms + SOLANA_BLOCK_TIME_ADJUSTMENT_MS);
 
         if adjusted_latency_ms > MAX_LATENCY_THRESHOLD_MS {
-            log::warn!(
-                "⚠️  High gRPC latency: {}ms (threshold: {}ms, raw: recv={}ms, block={}ms)",
-                adjusted_latency_ms,
-                MAX_LATENCY_THRESHOLD_MS,
-                recv_ms,
-                block_time_ms
-            );
+            // log::warn!(
+            //     "⚠️  High gRPC latency: {}ms (threshold: {}ms, raw: recv={}ms, block={}ms)",
+            //     adjusted_latency_ms,
+            //     MAX_LATENCY_THRESHOLD_MS,
+            //     recv_ms,
+            //     block_time_ms
+            // );
         }
     }
 

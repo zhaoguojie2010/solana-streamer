@@ -220,6 +220,8 @@ pub struct RaydiumClmmAmmConfigAccountEvent {
     pub lamports: u64,
     pub owner: Pubkey,
     pub rent_epoch: u64,
+    #[serde(skip)]
+    pub raw_account_data: Vec<u8>,
     pub amm_config: AmmConfig,
 }
 
@@ -232,6 +234,8 @@ pub struct RaydiumClmmPoolStateAccountEvent {
     pub lamports: u64,
     pub owner: Pubkey,
     pub rent_epoch: u64,
+    #[serde(skip)]
+    pub raw_account_data: Vec<u8>,
     pub pool_state: PoolState,
 }
 
@@ -244,6 +248,8 @@ pub struct RaydiumClmmTickArrayStateAccountEvent {
     pub lamports: u64,
     pub owner: Pubkey,
     pub rent_epoch: u64,
+    #[serde(skip)]
+    pub raw_account_data: Vec<u8>,
     pub tick_array_state: TickArrayState,
 }
 
@@ -256,6 +262,8 @@ pub struct RaydiumClmmTickArrayBitmapExtensionAccountEvent {
     pub lamports: u64,
     pub owner: Pubkey,
     pub rent_epoch: u64,
+    #[serde(skip)]
+    pub raw_account_data: Vec<u8>,
     pub tick_array_bitmap_extension: TickArrayBitmapExtension,
 }
 

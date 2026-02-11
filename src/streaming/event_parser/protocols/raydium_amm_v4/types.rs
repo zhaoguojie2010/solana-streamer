@@ -87,7 +87,7 @@ pub fn amm_info_decode(data: &[u8]) -> Option<AmmInfo> {
     borsh::from_slice::<AmmInfo>(&data[..AMM_INFO_SIZE]).ok()
 }
 
-pub fn amm_info_parser(account: &AccountPretty, mut metadata: EventMetadata) -> Option<DexEvent> {
+pub fn amm_info_parser(account: AccountPretty, mut metadata: EventMetadata) -> Option<DexEvent> {
     metadata.event_type = EventType::AccountRaydiumAmmV4AmmInfo;
 
     if account.data.len() < AMM_INFO_SIZE {
@@ -101,6 +101,7 @@ pub fn amm_info_parser(account: &AccountPretty, mut metadata: EventMetadata) -> 
             lamports: account.lamports,
             owner: account.owner,
             rent_epoch: account.rent_epoch,
+            raw_account_data: account.data,
             amm_info: amm_info,
         }))
     } else {

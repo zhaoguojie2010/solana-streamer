@@ -109,14 +109,8 @@ impl PooledAccountPretty {
         self.account.owner = Pubkey::try_from(account_info.owner.as_slice()).expect("valid pubkey");
         self.account.rent_epoch = account_info.rent_epoch;
 
-        // 优化数据字段的重用
-        let new_data = account_info.data;
-        if self.account.data.capacity() >= new_data.len() {
-            self.account.data.clear();
-            self.account.data.extend_from_slice(&new_data);
-        } else {
-            self.account.data = new_data;
-        }
+        // 直接 move Vec，避免字节拷贝
+        self.account.data = account_info.data;
 
         self.account.recv_us = get_high_perf_clock();
     }

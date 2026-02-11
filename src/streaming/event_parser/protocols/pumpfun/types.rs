@@ -33,7 +33,7 @@ pub fn bonding_curve_decode(data: &[u8]) -> Option<BondingCurve> {
 }
 
 pub fn bonding_curve_parser(
-    account: &AccountPretty,
+    account: AccountPretty,
     mut metadata: EventMetadata,
 ) -> Option<DexEvent> {
     metadata.event_type = EventType::AccountPumpFunBondingCurve;
@@ -49,6 +49,7 @@ pub fn bonding_curve_parser(
             lamports: account.lamports,
             owner: account.owner,
             rent_epoch: account.rent_epoch,
+            raw_account_data: account.data,
             bonding_curve,
         }))
     } else {
@@ -88,7 +89,7 @@ pub fn global_decode(data: &[u8]) -> Option<Global> {
     borsh::from_slice::<Global>(&data[..GLOBAL_SIZE]).ok()
 }
 
-pub fn global_parser(account: &AccountPretty, mut metadata: EventMetadata) -> Option<DexEvent> {
+pub fn global_parser(account: AccountPretty, mut metadata: EventMetadata) -> Option<DexEvent> {
     metadata.event_type = EventType::AccountPumpFunGlobal;
 
     if account.data.len() < GLOBAL_SIZE + 8 {
@@ -102,6 +103,7 @@ pub fn global_parser(account: &AccountPretty, mut metadata: EventMetadata) -> Op
             lamports: account.lamports,
             owner: account.owner,
             rent_epoch: account.rent_epoch,
+            raw_account_data: account.data,
             global,
         }))
     } else {

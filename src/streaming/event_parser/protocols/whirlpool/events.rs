@@ -12,6 +12,8 @@ pub struct WhirlpoolAccountEvent {
     pub lamports: u64,
     pub owner: Pubkey,
     pub rent_epoch: u64,
+    #[serde(skip)]
+    pub raw_account_data: Vec<u8>,
     pub whirlpool: Whirlpool,
 }
 
@@ -24,6 +26,8 @@ pub struct WhirlpoolTickArrayAccountEvent {
     pub lamports: u64,
     pub owner: Pubkey,
     pub rent_epoch: u64,
+    #[serde(skip)]
+    pub raw_account_data: Vec<u8>,
     pub tick_array: WhirlpoolTickArray,
 }
 

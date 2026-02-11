@@ -65,7 +65,7 @@ impl AccountEventParser {
 
         // 1. 尝试从账户 discriminator 解析（协议特定账户）
         if account.data.len() >= 8 {
-            let discriminator = &account.data[0..8];
+            let discriminator = <[u8; 8]>::try_from(&account.data[0..8]).ok()?;
 
             // 尝试识别协议类型
             if let Some(protocol) = EventDispatcher::match_protocol_by_program_id(&account.owner) {
@@ -86,8 +86,8 @@ impl AccountEventParser {
                     // 使用 dispatcher 解析
                     if let Some(event) = EventDispatcher::dispatch_account(
                         protocol,
-                        discriminator,
-                        &account,
+                        &discriminator,
+                        account,
                         metadata,
                     ) {
                         // 应用事件类型过滤
@@ -100,6 +100,8 @@ impl AccountEventParser {
                             return Some(event);
                         }
                     }
+                    // 协议账户解析失败时直接返回，避免进入通用账户解析分支
+                    return None;
                 }
             }
         }

@@ -37,7 +37,7 @@ pub fn amm_config_decode(data: &[u8]) -> Option<AmmConfig> {
     borsh::from_slice::<AmmConfig>(&data[..AMM_CONFIG_SIZE]).ok()
 }
 
-pub fn amm_config_parser(account: &AccountPretty, mut metadata: EventMetadata) -> Option<DexEvent> {
+pub fn amm_config_parser(account: AccountPretty, mut metadata: EventMetadata) -> Option<DexEvent> {
     metadata.event_type = EventType::AccountRaydiumClmmAmmConfig;
 
     if account.data.len() < AMM_CONFIG_SIZE + 8 {
@@ -51,6 +51,7 @@ pub fn amm_config_parser(account: &AccountPretty, mut metadata: EventMetadata) -
             lamports: account.lamports,
             owner: account.owner,
             rent_epoch: account.rent_epoch,
+            raw_account_data: account.data,
             amm_config: amm_config,
         }))
     } else {
@@ -124,7 +125,7 @@ pub fn pool_state_decode(data: &[u8]) -> Option<PoolState> {
     borsh::from_slice::<PoolState>(&data[..POOL_STATE_SIZE]).ok()
 }
 
-pub fn pool_state_parser(account: &AccountPretty, mut metadata: EventMetadata) -> Option<DexEvent> {
+pub fn pool_state_parser(account: AccountPretty, mut metadata: EventMetadata) -> Option<DexEvent> {
     metadata.event_type = EventType::AccountRaydiumClmmPoolState;
 
     if account.data.len() < POOL_STATE_SIZE + 8 {
@@ -138,6 +139,7 @@ pub fn pool_state_parser(account: &AccountPretty, mut metadata: EventMetadata) -
             lamports: account.lamports,
             owner: account.owner,
             rent_epoch: account.rent_epoch,
+            raw_account_data: account.data,
             pool_state: pool_state,
         }))
     } else {
@@ -205,7 +207,7 @@ pub fn tick_array_state_decode(data: &[u8]) -> Option<TickArrayState> {
 }
 
 pub fn tick_array_state_parser(
-    account: &AccountPretty,
+    account: AccountPretty,
     mut metadata: EventMetadata,
 ) -> Option<DexEvent> {
     metadata.event_type = EventType::AccountRaydiumClmmTickArrayState;
@@ -224,6 +226,7 @@ pub fn tick_array_state_parser(
                 lamports: account.lamports,
                 owner: account.owner,
                 rent_epoch: account.rent_epoch,
+                raw_account_data: account.data,
                 tick_array_state: tick_array_state,
             },
         ))
@@ -308,7 +311,7 @@ pub fn tick_array_bitmap_extension_decode(data: &[u8]) -> Option<TickArrayBitmap
 }
 
 pub fn tick_array_bitmap_extension_parser(
-    account: &AccountPretty,
+    account: AccountPretty,
     mut metadata: EventMetadata,
 ) -> Option<DexEvent> {
     metadata.event_type = EventType::AccountRaydiumClmmTickArrayBitmapExtension;
@@ -327,6 +330,7 @@ pub fn tick_array_bitmap_extension_parser(
                 lamports: account.lamports,
                 owner: account.owner,
                 rent_epoch: account.rent_epoch,
+                raw_account_data: account.data,
                 tick_array_bitmap_extension,
             },
         ))

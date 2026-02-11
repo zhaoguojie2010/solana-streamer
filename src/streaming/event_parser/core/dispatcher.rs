@@ -276,7 +276,7 @@ impl EventDispatcher {
     pub fn dispatch_account(
         protocol: Protocol,
         discriminator: &[u8],
-        account: &crate::streaming::grpc::AccountPretty,
+        account: crate::streaming::grpc::AccountPretty,
         mut metadata: crate::streaming::event_parser::common::EventMetadata,
     ) -> Option<DexEvent> {
         // 根据协议类型设置 metadata.protocol

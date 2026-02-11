@@ -39,7 +39,7 @@ pub fn amm_config_decode(data: &[u8]) -> Option<AmmConfig> {
     borsh::from_slice::<AmmConfig>(&data[..AMM_CONFIG_SIZE]).ok()
 }
 
-pub fn amm_config_parser(account: &AccountPretty, mut metadata: EventMetadata) -> Option<DexEvent> {
+pub fn amm_config_parser(account: AccountPretty, mut metadata: EventMetadata) -> Option<DexEvent> {
     metadata.event_type = EventType::AccountRaydiumCpmmAmmConfig;
 
     if account.data.len() < AMM_CONFIG_SIZE + 8 {
@@ -53,6 +53,7 @@ pub fn amm_config_parser(account: &AccountPretty, mut metadata: EventMetadata) -
             lamports: account.lamports,
             owner: account.owner,
             rent_epoch: account.rent_epoch,
+            raw_account_data: account.data,
             amm_config: amm_config,
         }))
     } else {
@@ -107,7 +108,7 @@ pub fn pool_state_decode(data: &[u8]) -> Option<PoolState> {
     borsh::from_slice::<PoolState>(&data[..POOL_STATE_SIZE]).ok()
 }
 
-pub fn pool_state_parser(account: &AccountPretty, mut metadata: EventMetadata) -> Option<DexEvent> {
+pub fn pool_state_parser(account: AccountPretty, mut metadata: EventMetadata) -> Option<DexEvent> {
     metadata.event_type = EventType::AccountRaydiumCpmmPoolState;
 
     if account.data.len() < POOL_STATE_SIZE + 8 {
@@ -121,6 +122,7 @@ pub fn pool_state_parser(account: &AccountPretty, mut metadata: EventMetadata) -
             lamports: account.lamports,
             owner: account.owner,
             rent_epoch: account.rent_epoch,
+            raw_account_data: account.data,
             pool_state: pool_state,
         }))
     } else {

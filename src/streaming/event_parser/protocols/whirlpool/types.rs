@@ -281,7 +281,7 @@ pub fn whirlpool_decode(data: &[u8]) -> Option<Whirlpool> {
     })
 }
 
-pub fn whirlpool_parser(account: &AccountPretty, mut metadata: EventMetadata) -> Option<DexEvent> {
+pub fn whirlpool_parser(account: AccountPretty, mut metadata: EventMetadata) -> Option<DexEvent> {
     metadata.event_type = EventType::AccountWhirlpool;
 
     // 账户总大小应该是 8 (discriminator) + 645 (数据) = 653 字节
@@ -311,6 +311,7 @@ pub fn whirlpool_parser(account: &AccountPretty, mut metadata: EventMetadata) ->
             lamports: account.lamports,
             owner: account.owner,
             rent_epoch: account.rent_epoch,
+            raw_account_data: account.data,
             whirlpool,
         }))
     } else {
@@ -331,7 +332,7 @@ pub fn whirlpool_tick_array_decode(data: &[u8]) -> Option<WhirlpoolTickArray> {
 }
 
 pub fn whirlpool_tick_array_parser(
-    account: &AccountPretty,
+    account: AccountPretty,
     mut metadata: EventMetadata,
 ) -> Option<DexEvent> {
     metadata.event_type = EventType::AccountWhirlpoolTickArray;
@@ -357,6 +358,7 @@ pub fn whirlpool_tick_array_parser(
                 lamports: account.lamports,
                 owner: account.owner,
                 rent_epoch: account.rent_epoch,
+                raw_account_data: account.data,
                 tick_array,
             },
         ))
