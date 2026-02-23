@@ -32,7 +32,7 @@ async fn subscribe_meteora_dlmm_accounts() -> Result<(), Box<dyn std::error::Err
     config.enable_metrics = true;
     let grpc = YellowstoneGrpc::new_with_config(
         "https://solana-yellowstone-grpc.publicnode.com:443".to_string(),
-        None,
+        Some("3ec495919af1e20d458053d07565e8c785d10b17c0a33d7ed9e4e0a9df05b8ff".to_string()),
         config,
     )?;
 

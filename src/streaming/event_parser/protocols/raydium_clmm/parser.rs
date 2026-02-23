@@ -1,7 +1,7 @@
 use crate::streaming::event_parser::{
     common::{
         read_i32_le, read_option_bool, read_u128_le, read_u64_le, read_u8_le, EventMetadata,
-        EventType,
+        EventType, ProgramDataItem,
     },
     protocols::raydium_clmm::{
         discriminators, RaydiumClmmClosePositionEvent, RaydiumClmmCreatePoolEvent,
@@ -16,6 +16,23 @@ use solana_sdk::pubkey::Pubkey;
 /// Raydium CLMM程序ID
 pub const RAYDIUM_CLMM_PROGRAM_ID: Pubkey =
     solana_sdk::pubkey!("CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK");
+
+/// SwapEvent 从 Anchor 事件日志解析出来的数据
+#[derive(Debug, Clone, Default)]
+pub struct SwapEventLogData {
+    pub pool_state: Pubkey,
+    pub sender: Pubkey,
+    pub token_account_0: Pubkey,
+    pub token_account_1: Pubkey,
+    pub amount_0: u64,
+    pub transfer_fee_0: u64,
+    pub amount_1: u64,
+    pub transfer_fee_1: u64,
+    pub zero_for_one: bool,
+    pub sqrt_price_x64: u128,
+    pub liquidity: u128,
+    pub tick: i32,
+}
 
 /// 解析 Raydium CLMM instruction data
 ///
@@ -49,6 +66,10 @@ pub fn parse_raydium_clmm_instruction_data(
     }
 }
 
+pub fn is_raydium_clmm_swap_instruction(discriminator: &[u8]) -> bool {
+    matches!(discriminator, discriminators::SWAP | discriminators::SWAP_V2)
+}
+
 /// 解析 Raydium CLMM inner instruction data
 ///
 /// Raydium CLMM 没有 inner instruction 事件
@@ -59,7 +80,6 @@ pub fn parse_raydium_clmm_inner_instruction_data(
 ) -> Option<DexEvent> {
     None
 }
-
 
 /// 解析 Raydium CLMM 账户数据
 ///
@@ -339,6 +359,7 @@ fn parse_swap_instruction(
         token_program: accounts[8],
         tick_array: accounts[9],
         remaining_accounts: accounts[10..].to_vec(),
+        ..Default::default()
     }))
 }
 
@@ -378,5 +399,80 @@ fn parse_swap_v2_instruction(
         input_vault_mint: accounts[11],
         output_vault_mint: accounts[12],
         remaining_accounts: accounts[13..].to_vec(),
+        ..Default::default()
     }))
+}
+
+/// 从 Anchor 事件日志中解析 SwapEvent 数据
+///
+/// Anchor 事件日志格式: "Program data: <base64_encoded_event>"
+/// 事件数据格式: [8字节鉴别器] [事件数据]
+pub fn parse_swap_event_from_log(log_data_base64: &str) -> Option<SwapEventLogData> {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    let decoded = STANDARD.decode(log_data_base64).ok()?;
+
+    if decoded.len() < 8 {
+        return None;
+    }
+    if &decoded[0..8] != discriminators::SWAP_EVENT {
+        return None;
+    }
+
+    let mut offset = 8;
+    let pool_state = Pubkey::new_from_array(decoded.get(offset..offset + 32)?.try_into().ok()?);
+    offset += 32;
+    let sender = Pubkey::new_from_array(decoded.get(offset..offset + 32)?.try_into().ok()?);
+    offset += 32;
+    let token_account_0 =
+        Pubkey::new_from_array(decoded.get(offset..offset + 32)?.try_into().ok()?);
+    offset += 32;
+    let token_account_1 =
+        Pubkey::new_from_array(decoded.get(offset..offset + 32)?.try_into().ok()?);
+    offset += 32;
+
+    let amount_0 = read_u64_le(&decoded, offset)?;
+    offset += 8;
+    let transfer_fee_0 = read_u64_le(&decoded, offset)?;
+    offset += 8;
+    let amount_1 = read_u64_le(&decoded, offset)?;
+    offset += 8;
+    let transfer_fee_1 = read_u64_le(&decoded, offset)?;
+    offset += 8;
+    let zero_for_one = read_u8_le(&decoded, offset)? != 0;
+    offset += 1;
+    let sqrt_price_x64 = read_u128_le(&decoded, offset)?;
+    offset += 16;
+    let liquidity = read_u128_le(&decoded, offset)?;
+    offset += 16;
+    let tick = read_i32_le(&decoded, offset)?;
+
+    Some(SwapEventLogData {
+        pool_state,
+        sender,
+        token_account_0,
+        token_account_1,
+        amount_0,
+        transfer_fee_0,
+        amount_1,
+        transfer_fee_1,
+        zero_for_one,
+        sqrt_price_x64,
+        liquidity,
+        tick,
+    })
+}
+
+/// 从 ProgramDataItem 解析 SwapEvent 数据
+pub fn parse_swap_event_from_program_data(
+    item: &ProgramDataItem,
+    expected_pool_state: &Pubkey,
+) -> Option<SwapEventLogData> {
+    if item.program_id != RAYDIUM_CLMM_PROGRAM_ID {
+        return None;
+    }
+    let event_data = parse_swap_event_from_log(&item.base64)?;
+    if &event_data.pool_state != expected_pool_state {
+        return None;
+    }
+    Some(event_data)
 }

@@ -1,7 +1,7 @@
 use crate::streaming::event_parser::common::EventMetadata;
-use crate::streaming::event_parser::protocols::raydium_clmm::types::{PoolState, TickArrayBitmapExtension, TickArrayState};
-use crate::{
-    streaming::event_parser::protocols::raydium_clmm::types::AmmConfig,
+use crate::streaming::event_parser::protocols::raydium_clmm::types::AmmConfig;
+use crate::streaming::event_parser::protocols::raydium_clmm::types::{
+    PoolState, TickArrayBitmapExtension, TickArrayState,
 };
 use serde::{Deserialize, Serialize};
 use solana_sdk::pubkey::Pubkey;
@@ -14,6 +14,18 @@ pub struct RaydiumClmmSwapEvent {
     pub other_amount_threshold: u64,
     pub sqrt_price_limit_x64: u128,
     pub is_base_input: bool,
+    // 来自日志事件 SwapEvent 的字段
+    pub sender: Pubkey,
+    pub token_account_0: Pubkey,
+    pub token_account_1: Pubkey,
+    pub amount_0: u64,
+    pub transfer_fee_0: u64,
+    pub amount_1: u64,
+    pub transfer_fee_1: u64,
+    pub zero_for_one: bool,
+    pub sqrt_price_x64: u128,
+    pub liquidity: u128,
+    pub tick: i32,
     pub payer: Pubkey,
     pub amm_config: Pubkey,
     pub pool_state: Pubkey,
@@ -27,7 +39,6 @@ pub struct RaydiumClmmSwapEvent {
     pub remaining_accounts: Vec<Pubkey>,
 }
 
-
 /// 交易v2
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RaydiumClmmSwapV2Event {
@@ -36,6 +47,18 @@ pub struct RaydiumClmmSwapV2Event {
     pub other_amount_threshold: u64,
     pub sqrt_price_limit_x64: u128,
     pub is_base_input: bool,
+    // 来自日志事件 SwapEvent 的字段
+    pub sender: Pubkey,
+    pub token_account_0: Pubkey,
+    pub token_account_1: Pubkey,
+    pub amount_0: u64,
+    pub transfer_fee_0: u64,
+    pub amount_1: u64,
+    pub transfer_fee_1: u64,
+    pub zero_for_one: bool,
+    pub sqrt_price_x64: u128,
+    pub liquidity: u128,
+    pub tick: i32,
     pub payer: Pubkey,
     pub amm_config: Pubkey,
     pub pool_state: Pubkey,
@@ -278,6 +301,9 @@ pub mod discriminators {
     pub const CREATE_POOL: &[u8] = &[233, 146, 209, 142, 207, 104, 64, 188];
     pub const OPEN_POSITION_WITH_TOKEN_22_NFT: &[u8] = &[77, 255, 174, 82, 125, 29, 201, 46];
     pub const OPEN_POSITION_V2: &[u8] = &[77, 184, 74, 214, 112, 86, 241, 199];
+
+    // 事件鉴别器（Anchor event: SwapEvent）
+    pub const SWAP_EVENT: &[u8] = &[64, 198, 205, 232, 38, 8, 113, 226];
 
     // 账号鉴别器
     pub const AMM_CONFIG: &[u8] = &[218, 244, 33, 104, 203, 203, 43, 111];

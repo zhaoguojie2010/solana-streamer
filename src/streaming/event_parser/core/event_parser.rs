@@ -1,17 +1,19 @@
 use crate::streaming::event_parser::{
-    DexEvent, Protocol,
     common::{
-        EventMetadata, ProgramDataIndex, build_program_data_index,
-        filter::EventTypeFilter, high_performance_clock::elapsed_micros_since,
-        parse_swap_data_from_next_grpc_instructions, parse_swap_data_from_next_instructions
-    }, core::{
+        build_program_data_index, filter::EventTypeFilter,
+        high_performance_clock::elapsed_micros_since, parse_swap_data_from_next_grpc_instructions,
+        parse_swap_data_from_next_instructions, EventMetadata, ProgramDataIndex,
+    },
+    core::{
         dispatcher::EventDispatcher,
         global_state::{
             add_bonk_dev_address, add_dev_address, is_bonk_dev_address_in_signature,
             is_dev_address_in_signature,
         },
         merger_event::merge,
-    }, protocols::raydium_amm_v4::parser::RAYDIUM_AMM_V4_PROGRAM_ID
+    },
+    protocols::raydium_amm_v4::parser::RAYDIUM_AMM_V4_PROGRAM_ID,
+    DexEvent, Protocol,
 };
 use prost_types::Timestamp;
 use solana_sdk::{
@@ -239,8 +241,7 @@ impl EventParser {
                         if let Some(protocol) =
                             EventDispatcher::match_protocol_by_program_id(&program_id)
                         {
-                            if Self::instruction_needs_program_data(&protocol, &instruction.data)
-                            {
+                            if Self::instruction_needs_program_data(&protocol, &instruction.data) {
                                 program_data_index = Some(build_program_data_index(
                                     log_messages,
                                     compiled_instructions.len(),
@@ -432,7 +433,7 @@ impl EventParser {
             Some(e) => e,
             None => return Ok(()),
         };
-        
+
         // 对于 Raydium CPMM swap 事件，尝试从日志中提取额外数据
         if matches!(protocol, Protocol::RaydiumCpmm) {
             if let DexEvent::RaydiumCpmmSwapEvent(ref mut swap_event) = event {
@@ -458,6 +459,57 @@ impl EventParser {
                             swap_event.creator_fee = log_data.creator_fee;
                             swap_event.creator_fee_on_input = log_data.creator_fee_on_input;
                         }
+                    }
+                }
+            }
+        }
+
+        // 对于 Raydium CLMM swap/swap_v2 事件，尝试从日志中提取额外数据
+        if matches!(protocol, Protocol::RaydiumClmm) {
+            if let Some(program_data_index) = program_data_index {
+                use crate::streaming::event_parser::protocols::raydium_clmm::parser::parse_swap_event_from_program_data;
+                let item = if let Some(inner_index) = inner_index {
+                    program_data_index.get_inner(outer_index, inner_index)
+                } else {
+                    program_data_index.get_outer(outer_index)
+                };
+                if let Some(item) = item {
+                    match &mut event {
+                        DexEvent::RaydiumClmmSwapEvent(swap_event) => {
+                            if let Some(log_data) =
+                                parse_swap_event_from_program_data(item, &swap_event.pool_state)
+                            {
+                                swap_event.sender = log_data.sender;
+                                swap_event.token_account_0 = log_data.token_account_0;
+                                swap_event.token_account_1 = log_data.token_account_1;
+                                swap_event.amount_0 = log_data.amount_0;
+                                swap_event.transfer_fee_0 = log_data.transfer_fee_0;
+                                swap_event.amount_1 = log_data.amount_1;
+                                swap_event.transfer_fee_1 = log_data.transfer_fee_1;
+                                swap_event.zero_for_one = log_data.zero_for_one;
+                                swap_event.sqrt_price_x64 = log_data.sqrt_price_x64;
+                                swap_event.liquidity = log_data.liquidity;
+                                swap_event.tick = log_data.tick;
+                            }
+                        }
+                        DexEvent::RaydiumClmmSwapV2Event(swap_event) => {
+                            if let Some(log_data) =
+                                parse_swap_event_from_program_data(item, &swap_event.pool_state)
+                            {
+                                swap_event.sender = log_data.sender;
+                                swap_event.token_account_0 = log_data.token_account_0;
+                                swap_event.token_account_1 = log_data.token_account_1;
+                                swap_event.amount_0 = log_data.amount_0;
+                                swap_event.transfer_fee_0 = log_data.transfer_fee_0;
+                                swap_event.amount_1 = log_data.amount_1;
+                                swap_event.transfer_fee_1 = log_data.transfer_fee_1;
+                                swap_event.zero_for_one = log_data.zero_for_one;
+                                swap_event.sqrt_price_x64 = log_data.sqrt_price_x64;
+                                swap_event.liquidity = log_data.liquidity;
+                                swap_event.tick = log_data.tick;
+                            }
+                        }
+                        _ => {}
                     }
                 }
             }
@@ -751,6 +803,14 @@ impl EventParser {
                     return false;
                 }
                 crate::streaming::event_parser::protocols::raydium_cpmm::parser::is_raydium_cpmm_swap_instruction(
+                    &data[..8],
+                )
+            }
+            Protocol::RaydiumClmm => {
+                if data.len() < 8 {
+                    return false;
+                }
+                crate::streaming::event_parser::protocols::raydium_clmm::parser::is_raydium_clmm_swap_instruction(
                     &data[..8],
                 )
             }
