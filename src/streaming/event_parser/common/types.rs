@@ -59,7 +59,16 @@ pub enum ProtocolType {
 
 /// Event type enumeration
 #[derive(
-    Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize, BorshSerialize, BorshDeserialize,
+    Debug,
+    Clone,
+    Default,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    BorshSerialize,
+    BorshDeserialize,
 )]
 pub enum EventType {
     // PumpSwap events
@@ -119,6 +128,10 @@ pub enum EventType {
     MeteoraDammV2InitializePool,
     MeteoraDammV2InitializeCustomizablePool,
     MeteoraDammV2InitializePoolWithDynamicConfig,
+
+    // Meteora DLMM events
+    MeteoraDlmmSwap,
+    MeteoraDlmmSwap2,
 
     // Account events
     AccountRaydiumAmmV4AmmInfo,
@@ -228,8 +241,14 @@ impl fmt::Display for EventType {
             EventType::MeteoraDammV2Swap => write!(f, "MeteoraDammV2Swap"),
             EventType::MeteoraDammV2Swap2 => write!(f, "MeteoraDammV2Swap2"),
             EventType::MeteoraDammV2InitializePool => write!(f, "MeteoraDammV2InitializePool"),
-            EventType::MeteoraDammV2InitializeCustomizablePool => write!(f, "MeteoraDammV2InitializeCustomizablePool"),
-            EventType::MeteoraDammV2InitializePoolWithDynamicConfig => write!(f, "MeteoraDammV2InitializePoolWithDynamicConfig"),
+            EventType::MeteoraDammV2InitializeCustomizablePool => {
+                write!(f, "MeteoraDammV2InitializeCustomizablePool")
+            }
+            EventType::MeteoraDammV2InitializePoolWithDynamicConfig => {
+                write!(f, "MeteoraDammV2InitializePoolWithDynamicConfig")
+            }
+            EventType::MeteoraDlmmSwap => write!(f, "MeteoraDlmmSwap"),
+            EventType::MeteoraDlmmSwap2 => write!(f, "MeteoraDlmmSwap2"),
             EventType::AccountRaydiumAmmV4AmmInfo => write!(f, "AccountRaydiumAmmV4AmmInfo"),
             EventType::AccountPumpSwapGlobalConfig => write!(f, "AccountPumpSwapGlobalConfig"),
             EventType::AccountPumpSwapPool => write!(f, "AccountPumpSwapPool"),
@@ -251,7 +270,9 @@ impl fmt::Display for EventType {
             EventType::AccountRaydiumCpmmPoolState => write!(f, "AccountRaydiumCpmmPoolState"),
             EventType::AccountMeteoraDlmmLbPair => write!(f, "AccountMeteoraDlmmLbPair"),
             EventType::AccountMeteoraDlmmBinArray => write!(f, "AccountMeteoraDlmmBinArray"),
-            EventType::AccountMeteoraDlmmBinArrayBitmapExtension => write!(f, "AccountMeteoraDlmmBinArrayBitmapExtension"),
+            EventType::AccountMeteoraDlmmBinArrayBitmapExtension => {
+                write!(f, "AccountMeteoraDlmmBinArrayBitmapExtension")
+            }
             EventType::AccountWhirlpool => write!(f, "AccountWhirlpool"),
             EventType::AccountWhirlpoolTickArray => write!(f, "AccountWhirlpoolTickArray"),
             EventType::TokenAccount => write!(f, "TokenAccount"),
@@ -469,6 +490,36 @@ pub fn parse_swap_data_from_next_instructions(
             from_vault = Some(e.pool_pc_token_account);
             to_vault = Some(e.pool_coin_token_account);
         }
+        DexEvent::MeteoraDlmmSwapEvent(e) => {
+            if e.swap_for_y {
+                from_mint = e.token_x_mint;
+                to_mint = e.token_y_mint;
+                from_vault = e.reserve_x;
+                to_vault = e.reserve_y;
+            } else {
+                from_mint = e.token_y_mint;
+                to_mint = e.token_x_mint;
+                from_vault = e.reserve_y;
+                to_vault = e.reserve_x;
+            }
+            user_from_token = e.user_token_in;
+            user_to_token = e.user_token_out;
+        }
+        DexEvent::MeteoraDlmmSwap2Event(e) => {
+            if e.swap_for_y {
+                from_mint = e.token_x_mint;
+                to_mint = e.token_y_mint;
+                from_vault = e.reserve_x;
+                to_vault = e.reserve_y;
+            } else {
+                from_mint = e.token_y_mint;
+                to_mint = e.token_x_mint;
+                from_vault = e.reserve_y;
+                to_vault = e.reserve_x;
+            }
+            user_from_token = e.user_token_in;
+            user_to_token = e.user_token_out;
+        }
         _ => {}
     }
 
@@ -638,6 +689,36 @@ pub fn parse_swap_data_from_next_grpc_instructions(
             user_to_token = Some(e.user_destination_token_account);
             from_vault = Some(e.pool_pc_token_account);
             to_vault = Some(e.pool_coin_token_account);
+        }
+        DexEvent::MeteoraDlmmSwapEvent(e) => {
+            if e.swap_for_y {
+                from_mint = e.token_x_mint;
+                to_mint = e.token_y_mint;
+                from_vault = e.reserve_x;
+                to_vault = e.reserve_y;
+            } else {
+                from_mint = e.token_y_mint;
+                to_mint = e.token_x_mint;
+                from_vault = e.reserve_y;
+                to_vault = e.reserve_x;
+            }
+            user_from_token = e.user_token_in;
+            user_to_token = e.user_token_out;
+        }
+        DexEvent::MeteoraDlmmSwap2Event(e) => {
+            if e.swap_for_y {
+                from_mint = e.token_x_mint;
+                to_mint = e.token_y_mint;
+                from_vault = e.reserve_x;
+                to_vault = e.reserve_y;
+            } else {
+                from_mint = e.token_y_mint;
+                to_mint = e.token_x_mint;
+                from_vault = e.reserve_y;
+                to_vault = e.reserve_x;
+            }
+            user_from_token = e.user_token_in;
+            user_to_token = e.user_token_out;
         }
         _ => {}
     }

@@ -103,10 +103,12 @@ impl EventDispatcher {
                 accounts,
                 metadata,
             ),
-            Protocol::MeteoraDlmm => {
-                // Meteora DLMM 目前不需要解析指令数据，返回 None
-                None
-            }
+            Protocol::MeteoraDlmm => meteora_dlmm::parse_meteora_dlmm_instruction_data(
+                instruction_discriminator,
+                instruction_data,
+                accounts,
+                metadata,
+            ),
             Protocol::Whirlpool => {
                 // Whirlpool 目前不需要解析指令数据，返回 None
                 None
@@ -176,15 +178,18 @@ impl EventDispatcher {
                 inner_instruction_data,
                 metadata,
             ),
-            Protocol::MeteoraDammV2 => meteora_damm_v2::parse_meteora_damm_v2_inner_instruction_data(
+            Protocol::MeteoraDammV2 => {
+                meteora_damm_v2::parse_meteora_damm_v2_inner_instruction_data(
+                    inner_instruction_discriminator,
+                    inner_instruction_data,
+                    metadata,
+                )
+            }
+            Protocol::MeteoraDlmm => meteora_dlmm::parse_meteora_dlmm_inner_instruction_data(
                 inner_instruction_discriminator,
                 inner_instruction_data,
                 metadata,
             ),
-            Protocol::MeteoraDlmm => {
-                // Meteora DLMM 目前不需要解析 inner instruction 数据，返回 None
-                None
-            }
             Protocol::Whirlpool => {
                 // Whirlpool 目前不需要解析 inner instruction 数据，返回 None
                 None

@@ -67,7 +67,9 @@ pub enum DexEvent {
     RaydiumClmmAmmConfigAccountEvent(RaydiumClmmAmmConfigAccountEvent),
     RaydiumClmmPoolStateAccountEvent(RaydiumClmmPoolStateAccountEvent),
     RaydiumClmmTickArrayStateAccountEvent(RaydiumClmmTickArrayStateAccountEvent),
-    RaydiumClmmTickArrayBitmapExtensionAccountEvent(RaydiumClmmTickArrayBitmapExtensionAccountEvent),
+    RaydiumClmmTickArrayBitmapExtensionAccountEvent(
+        RaydiumClmmTickArrayBitmapExtensionAccountEvent,
+    ),
 
     // Raydium CPMM events
     RaydiumCpmmSwapEvent(RaydiumCpmmSwapEvent),
@@ -82,9 +84,13 @@ pub enum DexEvent {
     MeteoraDammV2Swap2Event(MeteoraDammV2Swap2Event),
     MeteoraDammV2InitializePoolEvent(MeteoraDammV2InitializePoolEvent),
     MeteoraDammV2InitializeCustomizablePoolEvent(MeteoraDammV2InitializeCustomizablePoolEvent),
-    MeteoraDammV2InitializePoolWithDynamicConfigEvent(MeteoraDammV2InitializePoolWithDynamicConfigEvent),
+    MeteoraDammV2InitializePoolWithDynamicConfigEvent(
+        MeteoraDammV2InitializePoolWithDynamicConfigEvent,
+    ),
 
     // Meteora DLMM events
+    MeteoraDlmmSwapEvent(MeteoraDlmmSwapEvent),
+    MeteoraDlmmSwap2Event(MeteoraDlmmSwap2Event),
     MeteoraDlmmLbPairAccountEvent(MeteoraDlmmLbPairAccountEvent),
     MeteoraDlmmBinArrayAccountEvent(MeteoraDlmmBinArrayAccountEvent),
     MeteoraDlmmBinArrayBitmapExtensionAccountEvent(MeteoraDlmmBinArrayBitmapExtensionAccountEvent),
@@ -154,6 +160,8 @@ impl DexEvent {
             DexEvent::MeteoraDammV2InitializePoolEvent(e) => &e.metadata,
             DexEvent::MeteoraDammV2InitializeCustomizablePoolEvent(e) => &e.metadata,
             DexEvent::MeteoraDammV2InitializePoolWithDynamicConfigEvent(e) => &e.metadata,
+            DexEvent::MeteoraDlmmSwapEvent(e) => &e.metadata,
+            DexEvent::MeteoraDlmmSwap2Event(e) => &e.metadata,
             DexEvent::MeteoraDlmmLbPairAccountEvent(e) => &e.metadata,
             DexEvent::MeteoraDlmmBinArrayAccountEvent(e) => &e.metadata,
             DexEvent::MeteoraDlmmBinArrayBitmapExtensionAccountEvent(e) => &e.metadata,
@@ -219,6 +227,8 @@ impl DexEvent {
             DexEvent::MeteoraDammV2InitializePoolEvent(e) => &mut e.metadata,
             DexEvent::MeteoraDammV2InitializeCustomizablePoolEvent(e) => &mut e.metadata,
             DexEvent::MeteoraDammV2InitializePoolWithDynamicConfigEvent(e) => &mut e.metadata,
+            DexEvent::MeteoraDlmmSwapEvent(e) => &mut e.metadata,
+            DexEvent::MeteoraDlmmSwap2Event(e) => &mut e.metadata,
             DexEvent::MeteoraDlmmLbPairAccountEvent(e) => &mut e.metadata,
             DexEvent::MeteoraDlmmBinArrayAccountEvent(e) => &mut e.metadata,
             DexEvent::MeteoraDlmmBinArrayBitmapExtensionAccountEvent(e) => &mut e.metadata,

@@ -238,6 +238,66 @@ pub fn merge(instruction_event: &mut DexEvent, cpi_log_event: DexEvent) {
             }
             _ => {}
         },
+        DexEvent::MeteoraDlmmSwapEvent(e) => match cpi_log_event {
+            DexEvent::MeteoraDlmmSwapEvent(cpie) => {
+                e.lb_pair = cpie.lb_pair;
+                e.from = cpie.from;
+                e.start_bin_id = cpie.start_bin_id;
+                e.end_bin_id = cpie.end_bin_id;
+                e.cpi_amount_in = cpie.cpi_amount_in;
+                e.cpi_amount_out = cpie.cpi_amount_out;
+                e.swap_for_y = cpie.swap_for_y;
+                e.fee = cpie.fee;
+                e.protocol_fee = cpie.protocol_fee;
+                e.fee_bps = cpie.fee_bps;
+                e.host_fee = cpie.host_fee;
+            }
+            DexEvent::MeteoraDlmmSwap2Event(cpie) => {
+                e.lb_pair = cpie.lb_pair;
+                e.from = cpie.from;
+                e.start_bin_id = cpie.start_bin_id;
+                e.end_bin_id = cpie.end_bin_id;
+                e.swap_for_y = cpie.swap_for_y;
+                e.fee_bps = cpie.fee_bps;
+                e.cpi_amount_in = cpie.swap_result.amount_in;
+                e.cpi_amount_out = cpie.swap_result.amount_out;
+                e.fee = cpie.swap_result.total_fee;
+                e.protocol_fee = cpie.swap_result.protocol_fee;
+                e.host_fee = cpie.swap_result.host_fee;
+            }
+            _ => {}
+        },
+        DexEvent::MeteoraDlmmSwap2Event(e) => match cpi_log_event {
+            DexEvent::MeteoraDlmmSwap2Event(cpie) => {
+                e.lb_pair = cpie.lb_pair;
+                e.from = cpie.from;
+                e.start_bin_id = cpie.start_bin_id;
+                e.end_bin_id = cpie.end_bin_id;
+                e.swap_for_y = cpie.swap_for_y;
+                e.fee_bps = cpie.fee_bps;
+                e.swap_result = cpie.swap_result;
+            }
+            DexEvent::MeteoraDlmmSwapEvent(cpie) => {
+                e.lb_pair = cpie.lb_pair;
+                e.from = cpie.from;
+                e.start_bin_id = cpie.start_bin_id;
+                e.end_bin_id = cpie.end_bin_id;
+                e.swap_for_y = cpie.swap_for_y;
+                e.fee_bps = cpie.fee_bps;
+                // Backward compatibility: old Swap event merged into Swap2 instruction event.
+                e.swap_result.amount_in = cpie.cpi_amount_in;
+                e.swap_result.amount_left = 0;
+                e.swap_result.amount_out = cpie.cpi_amount_out;
+                e.swap_result.total_fee = cpie.fee;
+                e.swap_result.lp_mm_fee = 0;
+                e.swap_result.protocol_fee = cpie.protocol_fee;
+                e.swap_result.host_fee = cpie.host_fee;
+                e.swap_result.lp_limit_order_fee = 0;
+                e.swap_result.limit_order_filled_amount = 0;
+                e.swap_result.limit_order_swapped_amount = 0;
+            }
+            _ => {}
+        },
         DexEvent::MeteoraDammV2SwapEvent(e) => match cpi_log_event {
             DexEvent::MeteoraDammV2SwapEvent(cpie) => {
                 e.pool = cpie.pool;
