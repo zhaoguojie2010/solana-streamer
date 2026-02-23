@@ -434,86 +434,13 @@ impl EventParser {
             None => return Ok(()),
         };
 
-        // 对于 Raydium CPMM swap 事件，尝试从日志中提取额外数据
-        if matches!(protocol, Protocol::RaydiumCpmm) {
-            if let DexEvent::RaydiumCpmmSwapEvent(ref mut swap_event) = event {
-                if let Some(program_data_index) = program_data_index {
-                    use crate::streaming::event_parser::protocols::raydium_cpmm::parser::parse_swap_event_from_program_data;
-                    let item = if let Some(inner_index) = inner_index {
-                        program_data_index.get_inner(outer_index, inner_index)
-                    } else {
-                        program_data_index.get_outer(outer_index)
-                    };
-                    if let Some(item) = item {
-                        if let Some(log_data) =
-                            parse_swap_event_from_program_data(item, &swap_event.pool_state)
-                        {
-                            swap_event.input_vault_before = log_data.input_vault_before;
-                            swap_event.output_vault_before = log_data.output_vault_before;
-                            swap_event.input_amount = log_data.input_amount;
-                            swap_event.output_amount = log_data.output_amount;
-                            swap_event.input_transfer_fee = log_data.input_transfer_fee;
-                            swap_event.output_transfer_fee = log_data.output_transfer_fee;
-                            swap_event.base_input = log_data.base_input;
-                            swap_event.trade_fee = log_data.trade_fee;
-                            swap_event.creator_fee = log_data.creator_fee;
-                            swap_event.creator_fee_on_input = log_data.creator_fee_on_input;
-                        }
-                    }
-                }
-            }
-        }
-
-        // 对于 Raydium CLMM swap/swap_v2 事件，尝试从日志中提取额外数据
-        if matches!(protocol, Protocol::RaydiumClmm) {
-            if let Some(program_data_index) = program_data_index {
-                use crate::streaming::event_parser::protocols::raydium_clmm::parser::parse_swap_event_from_program_data;
-                let item = if let Some(inner_index) = inner_index {
-                    program_data_index.get_inner(outer_index, inner_index)
-                } else {
-                    program_data_index.get_outer(outer_index)
-                };
-                if let Some(item) = item {
-                    match &mut event {
-                        DexEvent::RaydiumClmmSwapEvent(swap_event) => {
-                            if let Some(log_data) =
-                                parse_swap_event_from_program_data(item, &swap_event.pool_state)
-                            {
-                                swap_event.sender = log_data.sender;
-                                swap_event.token_account_0 = log_data.token_account_0;
-                                swap_event.token_account_1 = log_data.token_account_1;
-                                swap_event.amount_0 = log_data.amount_0;
-                                swap_event.transfer_fee_0 = log_data.transfer_fee_0;
-                                swap_event.amount_1 = log_data.amount_1;
-                                swap_event.transfer_fee_1 = log_data.transfer_fee_1;
-                                swap_event.zero_for_one = log_data.zero_for_one;
-                                swap_event.sqrt_price_x64 = log_data.sqrt_price_x64;
-                                swap_event.liquidity = log_data.liquidity;
-                                swap_event.tick = log_data.tick;
-                            }
-                        }
-                        DexEvent::RaydiumClmmSwapV2Event(swap_event) => {
-                            if let Some(log_data) =
-                                parse_swap_event_from_program_data(item, &swap_event.pool_state)
-                            {
-                                swap_event.sender = log_data.sender;
-                                swap_event.token_account_0 = log_data.token_account_0;
-                                swap_event.token_account_1 = log_data.token_account_1;
-                                swap_event.amount_0 = log_data.amount_0;
-                                swap_event.transfer_fee_0 = log_data.transfer_fee_0;
-                                swap_event.amount_1 = log_data.amount_1;
-                                swap_event.transfer_fee_1 = log_data.transfer_fee_1;
-                                swap_event.zero_for_one = log_data.zero_for_one;
-                                swap_event.sqrt_price_x64 = log_data.sqrt_price_x64;
-                                swap_event.liquidity = log_data.liquidity;
-                                swap_event.tick = log_data.tick;
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
-        }
+        enrich_event_from_program_data(
+            &mut event,
+            &protocol,
+            program_data_index,
+            outer_index,
+            inner_index,
+        );
 
         // 处理 inner instructions
         let mut inner_instruction_event: Option<DexEvent> = None;
@@ -894,5 +821,91 @@ impl EventParser {
             }
             _ => event,
         }
+    }
+}
+
+/// 根据协议类型，从 program data 日志中提取额外字段并填充到事件中
+fn enrich_event_from_program_data(
+    event: &mut DexEvent,
+    protocol: &Protocol,
+    program_data_index: Option<&ProgramDataIndex>,
+    outer_index: i64,
+    inner_index: Option<i64>,
+) {
+    let Some(index) = program_data_index else {
+        return;
+    };
+
+    let item = if let Some(inner_index) = inner_index {
+        index.get_inner(outer_index, inner_index)
+    } else {
+        index.get_outer(outer_index)
+    };
+
+    let Some(item) = item else {
+        return;
+    };
+
+    match protocol {
+        Protocol::RaydiumCpmm => {
+            use crate::streaming::event_parser::protocols::raydium_cpmm::parser::parse_swap_event_from_program_data;
+            if let DexEvent::RaydiumCpmmSwapEvent(swap_event) = event {
+                if let Some(log_data) =
+                    parse_swap_event_from_program_data(item, &swap_event.pool_state)
+                {
+                    swap_event.input_vault_before = log_data.input_vault_before;
+                    swap_event.output_vault_before = log_data.output_vault_before;
+                    swap_event.input_amount = log_data.input_amount;
+                    swap_event.output_amount = log_data.output_amount;
+                    swap_event.input_transfer_fee = log_data.input_transfer_fee;
+                    swap_event.output_transfer_fee = log_data.output_transfer_fee;
+                    swap_event.base_input = log_data.base_input;
+                    swap_event.trade_fee = log_data.trade_fee;
+                    swap_event.creator_fee = log_data.creator_fee;
+                    swap_event.creator_fee_on_input = log_data.creator_fee_on_input;
+                }
+            }
+        }
+        Protocol::RaydiumClmm => {
+            use crate::streaming::event_parser::protocols::raydium_clmm::parser::parse_swap_event_from_program_data;
+            match event {
+                DexEvent::RaydiumClmmSwapEvent(swap_event) => {
+                    if let Some(log_data) =
+                        parse_swap_event_from_program_data(item, &swap_event.pool_state)
+                    {
+                        swap_event.sender = log_data.sender;
+                        swap_event.token_account_0 = log_data.token_account_0;
+                        swap_event.token_account_1 = log_data.token_account_1;
+                        swap_event.amount_0 = log_data.amount_0;
+                        swap_event.transfer_fee_0 = log_data.transfer_fee_0;
+                        swap_event.amount_1 = log_data.amount_1;
+                        swap_event.transfer_fee_1 = log_data.transfer_fee_1;
+                        swap_event.zero_for_one = log_data.zero_for_one;
+                        swap_event.sqrt_price_x64 = log_data.sqrt_price_x64;
+                        swap_event.liquidity = log_data.liquidity;
+                        swap_event.tick = log_data.tick;
+                    }
+                }
+                DexEvent::RaydiumClmmSwapV2Event(swap_event) => {
+                    if let Some(log_data) =
+                        parse_swap_event_from_program_data(item, &swap_event.pool_state)
+                    {
+                        swap_event.sender = log_data.sender;
+                        swap_event.token_account_0 = log_data.token_account_0;
+                        swap_event.token_account_1 = log_data.token_account_1;
+                        swap_event.amount_0 = log_data.amount_0;
+                        swap_event.transfer_fee_0 = log_data.transfer_fee_0;
+                        swap_event.amount_1 = log_data.amount_1;
+                        swap_event.transfer_fee_1 = log_data.transfer_fee_1;
+                        swap_event.zero_for_one = log_data.zero_for_one;
+                        swap_event.sqrt_price_x64 = log_data.sqrt_price_x64;
+                        swap_event.liquidity = log_data.liquidity;
+                        swap_event.tick = log_data.tick;
+                    }
+                }
+                _ => {}
+            }
+        }
+        _ => {}
     }
 }
