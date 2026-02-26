@@ -67,12 +67,7 @@ fn parse_invocation_spans(logs: &[String]) -> Vec<InvocationSpan> {
 
     for (idx, log) in logs.iter().enumerate() {
         if let Some((program_id, depth)) = parse_invoke_line(log) {
-            spans.push(InvocationSpan {
-                program_id,
-                depth,
-                start: idx,
-                end: idx,
-            });
+            spans.push(InvocationSpan { program_id, depth, start: idx, end: idx });
             stack.push(spans.len() - 1);
             continue;
         }
@@ -132,10 +127,8 @@ pub fn build_program_data_index(
     outer_len: usize,
     inner_instructions: &[yellowstone_grpc_proto::prelude::InnerInstructions],
 ) -> ProgramDataIndex {
-    let mut index = ProgramDataIndex {
-        outer: vec![None; outer_len],
-        inner: vec![Vec::new(); outer_len],
-    };
+    let mut index =
+        ProgramDataIndex { outer: vec![None; outer_len], inner: vec![Vec::new(); outer_len] };
 
     for inner in inner_instructions.iter() {
         let outer_idx = inner.index as usize;
@@ -163,9 +156,7 @@ pub fn build_program_data_index(
         let mut inner_spans: Vec<&InvocationSpan> = spans
             .iter()
             .filter(|span| {
-                span.depth >= 2
-                    && span.start >= outer_span.start
-                    && span.end <= outer_span.end
+                span.depth >= 2 && span.start >= outer_span.start && span.end <= outer_span.end
             })
             .collect();
         inner_spans.sort_by_key(|span| span.start);

@@ -133,6 +133,10 @@ pub enum EventType {
     MeteoraDlmmSwap,
     MeteoraDlmmSwap2,
 
+    // Whirlpool events
+    WhirlpoolSwap,
+    WhirlpoolSwapV2,
+
     // Account events
     AccountRaydiumAmmV4AmmInfo,
     AccountPumpSwapGlobalConfig,
@@ -249,6 +253,8 @@ impl fmt::Display for EventType {
             }
             EventType::MeteoraDlmmSwap => write!(f, "MeteoraDlmmSwap"),
             EventType::MeteoraDlmmSwap2 => write!(f, "MeteoraDlmmSwap2"),
+            EventType::WhirlpoolSwap => write!(f, "WhirlpoolSwap"),
+            EventType::WhirlpoolSwapV2 => write!(f, "WhirlpoolSwapV2"),
             EventType::AccountRaydiumAmmV4AmmInfo => write!(f, "AccountRaydiumAmmV4AmmInfo"),
             EventType::AccountPumpSwapGlobalConfig => write!(f, "AccountPumpSwapGlobalConfig"),
             EventType::AccountPumpSwapPool => write!(f, "AccountPumpSwapPool"),
@@ -520,6 +526,38 @@ pub fn parse_swap_data_from_next_instructions(
             user_from_token = e.user_token_in;
             user_to_token = e.user_token_out;
         }
+        DexEvent::WhirlpoolSwapEvent(e) => {
+            swap_data.description =
+                Some("Unable to get from_mint and to_mint from WhirlpoolSwapEvent".into());
+            if e.a_to_b {
+                user_from_token = Some(e.token_owner_account_a);
+                user_to_token = Some(e.token_owner_account_b);
+                from_vault = Some(e.token_vault_a);
+                to_vault = Some(e.token_vault_b);
+            } else {
+                user_from_token = Some(e.token_owner_account_b);
+                user_to_token = Some(e.token_owner_account_a);
+                from_vault = Some(e.token_vault_b);
+                to_vault = Some(e.token_vault_a);
+            }
+        }
+        DexEvent::WhirlpoolSwapV2Event(e) => {
+            if e.a_to_b {
+                from_mint = Some(e.token_mint_a);
+                to_mint = Some(e.token_mint_b);
+                user_from_token = Some(e.token_owner_account_a);
+                user_to_token = Some(e.token_owner_account_b);
+                from_vault = Some(e.token_vault_a);
+                to_vault = Some(e.token_vault_b);
+            } else {
+                from_mint = Some(e.token_mint_b);
+                to_mint = Some(e.token_mint_a);
+                user_from_token = Some(e.token_owner_account_b);
+                user_to_token = Some(e.token_owner_account_a);
+                from_vault = Some(e.token_vault_b);
+                to_vault = Some(e.token_vault_a);
+            }
+        }
         _ => {}
     }
 
@@ -719,6 +757,38 @@ pub fn parse_swap_data_from_next_grpc_instructions(
             }
             user_from_token = e.user_token_in;
             user_to_token = e.user_token_out;
+        }
+        DexEvent::WhirlpoolSwapEvent(e) => {
+            swap_data.description =
+                Some("Unable to get from_mint and to_mint from WhirlpoolSwapEvent".into());
+            if e.a_to_b {
+                user_from_token = Some(e.token_owner_account_a);
+                user_to_token = Some(e.token_owner_account_b);
+                from_vault = Some(e.token_vault_a);
+                to_vault = Some(e.token_vault_b);
+            } else {
+                user_from_token = Some(e.token_owner_account_b);
+                user_to_token = Some(e.token_owner_account_a);
+                from_vault = Some(e.token_vault_b);
+                to_vault = Some(e.token_vault_a);
+            }
+        }
+        DexEvent::WhirlpoolSwapV2Event(e) => {
+            if e.a_to_b {
+                from_mint = Some(e.token_mint_a);
+                to_mint = Some(e.token_mint_b);
+                user_from_token = Some(e.token_owner_account_a);
+                user_to_token = Some(e.token_owner_account_b);
+                from_vault = Some(e.token_vault_a);
+                to_vault = Some(e.token_vault_b);
+            } else {
+                from_mint = Some(e.token_mint_b);
+                to_mint = Some(e.token_mint_a);
+                user_from_token = Some(e.token_owner_account_b);
+                user_to_token = Some(e.token_owner_account_a);
+                from_vault = Some(e.token_vault_b);
+                to_vault = Some(e.token_vault_a);
+            }
         }
         _ => {}
     }

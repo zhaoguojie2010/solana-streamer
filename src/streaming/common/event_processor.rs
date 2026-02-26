@@ -166,5 +166,11 @@ fn update_metrics_with_latency(
     recv_us: i64,
     block_time_ms: i64,
 ) {
-    MetricsManager::global().update_metrics_with_latency(ty, count, time_us, recv_us, block_time_ms);
+    MetricsManager::global().update_metrics_with_latency(
+        ty,
+        count,
+        time_us,
+        recv_us,
+        block_time_ms,
+    );
 }

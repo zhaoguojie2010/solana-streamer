@@ -1,8 +1,6 @@
 use crate::streaming::event_parser::common::EventMetadata;
+use crate::streaming::event_parser::protocols::raydium_cpmm::types::AmmConfig;
 use crate::streaming::event_parser::protocols::raydium_cpmm::types::PoolState;
-use crate::{
-    streaming::event_parser::protocols::raydium_cpmm::types::AmmConfig,
-};
 use borsh::BorshDeserialize;
 use serde::{Deserialize, Serialize};
 use solana_sdk::pubkey::Pubkey;
@@ -17,7 +15,7 @@ pub struct RaydiumCpmmSwapEvent {
     pub minimum_amount_out: u64,
     pub max_amount_in: u64,
     pub amount_out: u64,
-    
+
     // 从程序事件日志解析（如果可用）
     pub input_vault_before: u64,
     pub output_vault_before: u64,
@@ -29,7 +27,7 @@ pub struct RaydiumCpmmSwapEvent {
     pub trade_fee: u64,
     pub creator_fee: u64,
     pub creator_fee_on_input: bool,
-    
+
     // 账户信息
     pub payer: Pubkey,
     pub authority: Pubkey,
@@ -45,7 +43,6 @@ pub struct RaydiumCpmmSwapEvent {
     pub output_token_mint: Pubkey,
     pub observation_state: Pubkey,
 }
-
 
 /// 存款
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, BorshDeserialize)]
@@ -171,7 +168,7 @@ pub mod discriminators {
     // 账号鉴别器
     pub const AMM_CONFIG: &[u8] = &[218, 244, 33, 104, 203, 203, 43, 111];
     pub const POOL_STATE: &[u8] = &[247, 237, 227, 245, 215, 195, 222, 70];
-    
+
     // Anchor 事件鉴别器 (通过 anchor_lang::event 生成)
     // SwapEvent 的鉴别器是 anchor 事件名称的 discriminator
     // 计算方式: anchor_lang::solana_program::hash::hash(b"event:SwapEvent").to_bytes()[..8]

@@ -6,7 +6,10 @@ use solana_sdk::pubkey::Pubkey;
 use crate::streaming::{
     event_parser::{
         common::{EventMetadata, EventType},
-        protocols::meteora_dlmm::{MeteoraDlmmBinArrayAccountEvent, MeteoraDlmmBinArrayBitmapExtensionAccountEvent, MeteoraDlmmLbPairAccountEvent},
+        protocols::meteora_dlmm::{
+            MeteoraDlmmBinArrayAccountEvent, MeteoraDlmmBinArrayBitmapExtensionAccountEvent,
+            MeteoraDlmmLbPairAccountEvent,
+        },
         DexEvent,
     },
     grpc::AccountPretty,
@@ -179,18 +182,16 @@ pub fn lb_pair_parser(account: AccountPretty, mut metadata: EventMetadata) -> Op
         return None;
     }
     if let Some(lb_pair) = lb_pair_decode(&account.data[8..LB_PAIR_SIZE + 8]) {
-        Some(DexEvent::MeteoraDlmmLbPairAccountEvent(
-            MeteoraDlmmLbPairAccountEvent {
-                metadata,
-                pubkey: account.pubkey,
-                executable: account.executable,
-                lamports: account.lamports,
-                owner: account.owner,
-                rent_epoch: account.rent_epoch,
-                raw_account_data: account.data,
-                lb_pair,
-            },
-        ))
+        Some(DexEvent::MeteoraDlmmLbPairAccountEvent(MeteoraDlmmLbPairAccountEvent {
+            metadata,
+            pubkey: account.pubkey,
+            executable: account.executable,
+            lamports: account.lamports,
+            owner: account.owner,
+            rent_epoch: account.rent_epoch,
+            raw_account_data: account.data,
+            lb_pair,
+        }))
     } else {
         None
     }
@@ -203,13 +204,18 @@ pub fn bin_array_bitmap_extension_decode(data: &[u8]) -> Option<BinArrayBitmapEx
     borsh::from_slice::<BinArrayBitmapExtension>(&data[..BIN_ARRAY_BITMAP_EXTENSION_SIZE]).ok()
 }
 
-pub fn bin_array_bitmap_extension_parser(account: AccountPretty, mut metadata: EventMetadata) -> Option<DexEvent> {
+pub fn bin_array_bitmap_extension_parser(
+    account: AccountPretty,
+    mut metadata: EventMetadata,
+) -> Option<DexEvent> {
     metadata.event_type = EventType::AccountMeteoraDlmmBinArrayBitmapExtension;
 
     if account.data.len() < BIN_ARRAY_BITMAP_EXTENSION_SIZE + 8 {
         return None;
     }
-    if let Some(bin_array_bitmap_extension) = bin_array_bitmap_extension_decode(&account.data[8..BIN_ARRAY_BITMAP_EXTENSION_SIZE + 8]) {
+    if let Some(bin_array_bitmap_extension) =
+        bin_array_bitmap_extension_decode(&account.data[8..BIN_ARRAY_BITMAP_EXTENSION_SIZE + 8])
+    {
         Some(DexEvent::MeteoraDlmmBinArrayBitmapExtensionAccountEvent(
             MeteoraDlmmBinArrayBitmapExtensionAccountEvent {
                 metadata,
@@ -231,32 +237,38 @@ pub fn bin_array_decode(data: &[u8]) -> Option<BinArray> {
     if data.len() < BIN_ARRAY_SIZE {
         return None;
     }
-    
+
     // BinArray 使用 bytemuck 序列化，手动解析字节数组
     // 由于 Pubkey 不满足 Pod 要求，我们需要手动解析
     let mut offset = 0;
-    
+
     // 解析 index (i64, 8 bytes)
     let index = i64::from_le_bytes([
-        data[offset], data[offset + 1], data[offset + 2], data[offset + 3],
-        data[offset + 4], data[offset + 5], data[offset + 6], data[offset + 7],
+        data[offset],
+        data[offset + 1],
+        data[offset + 2],
+        data[offset + 3],
+        data[offset + 4],
+        data[offset + 5],
+        data[offset + 6],
+        data[offset + 7],
     ]);
     offset += 8;
-    
+
     // 解析 version (u8, 1 byte)
     let version = data[offset];
     offset += 1;
-    
+
     // 解析 _padding (7 bytes)
     let mut _padding = [0u8; 7];
     _padding.copy_from_slice(&data[offset..offset + 7]);
     offset += 7;
-    
+
     // 解析 lb_pair (Pubkey, 32 bytes)
     let lb_pair_bytes: [u8; 32] = data[offset..offset + 32].try_into().ok()?;
     let lb_pair = Pubkey::new_from_array(lb_pair_bytes);
     offset += 32;
-    
+
     // 解析 bins (70 * Bin size)
     const BIN_SIZE: usize = std::mem::size_of::<Bin>();
     let mut bins = [Bin::default(); 70];
@@ -265,7 +277,7 @@ pub fn bin_array_decode(data: &[u8]) -> Option<BinArray> {
         if bin_start + BIN_SIZE > data.len() {
             return None;
         }
-        
+
         // 解析单个 Bin
         let bin_data = &data[bin_start..bin_start + BIN_SIZE];
         bins[i] = Bin {
@@ -283,14 +295,8 @@ pub fn bin_array_decode(data: &[u8]) -> Option<BinArray> {
             amount_y_in: u128::from_le_bytes(bin_data[128..144].try_into().ok()?),
         };
     }
-    
-    Some(BinArray {
-        index,
-        version,
-        _padding,
-        lb_pair,
-        bins,
-    })
+
+    Some(BinArray { index, version, _padding, lb_pair, bins })
 }
 
 pub fn bin_array_parser(account: AccountPretty, mut metadata: EventMetadata) -> Option<DexEvent> {
@@ -301,18 +307,16 @@ pub fn bin_array_parser(account: AccountPretty, mut metadata: EventMetadata) -> 
         return None;
     }
     if let Some(bin_array) = bin_array_decode(&account.data[8..BIN_ARRAY_SIZE + 8]) {
-        Some(DexEvent::MeteoraDlmmBinArrayAccountEvent(
-            MeteoraDlmmBinArrayAccountEvent {
-                metadata,
-                pubkey: account.pubkey,
-                executable: account.executable,
-                lamports: account.lamports,
-                owner: account.owner,
-                rent_epoch: account.rent_epoch,
-                raw_account_data: account.data,
-                bin_array,
-            },
-        ))
+        Some(DexEvent::MeteoraDlmmBinArrayAccountEvent(MeteoraDlmmBinArrayAccountEvent {
+            metadata,
+            pubkey: account.pubkey,
+            executable: account.executable,
+            lamports: account.lamports,
+            owner: account.owner,
+            rent_epoch: account.rent_epoch,
+            raw_account_data: account.data,
+            bin_array,
+        }))
     } else {
         None
     }

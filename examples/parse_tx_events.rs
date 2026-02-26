@@ -1,8 +1,8 @@
 use anyhow::Result;
 use solana_commitment_config::CommitmentConfig;
 use solana_streamer_sdk::streaming::event_parser::core::event_parser::EventParser;
-use solana_streamer_sdk::streaming::event_parser::Protocol;
 use solana_streamer_sdk::streaming::event_parser::DexEvent;
+use solana_streamer_sdk::streaming::event_parser::Protocol;
 use std::str::FromStr;
 use std::sync::Arc;
 /// Get transaction data based on transaction signature
@@ -36,9 +36,13 @@ async fn main() -> Result<()> {
 
 /// Get details of a single transaction
 async fn get_single_transaction_details(signature_str: &str) -> Result<()> {
-    use solana_sdk::{signature::Signature, pubkey::Pubkey, message::compiled_instruction::CompiledInstruction};
-    use solana_transaction_status::{UiTransactionEncoding, InnerInstruction, InnerInstructions, UiInstruction};
     use prost_types::Timestamp;
+    use solana_sdk::{
+        message::compiled_instruction::CompiledInstruction, pubkey::Pubkey, signature::Signature,
+    };
+    use solana_transaction_status::{
+        InnerInstruction, InnerInstructions, UiInstruction, UiTransactionEncoding,
+    };
 
     let signature = Signature::from_str(signature_str)?;
 
@@ -111,7 +115,9 @@ async fn get_single_transaction_details(signature_str: &str) -> Result<()> {
 
                         for ui_instruction in &ui_inner.instructions {
                             if let UiInstruction::Compiled(ui_compiled) = ui_instruction {
-                                if let Ok(data) = solana_sdk::bs58::decode(&ui_compiled.data).into_vec() {
+                                if let Ok(data) =
+                                    solana_sdk::bs58::decode(&ui_compiled.data).into_vec()
+                                {
                                     let compiled_instruction = CompiledInstruction {
                                         program_id_index: ui_compiled.program_id_index,
                                         accounts: ui_compiled.accounts.to_vec(),
@@ -171,7 +177,8 @@ async fn get_single_transaction_details(signature_str: &str) -> Result<()> {
             accounts.extend(address_table_lookups);
 
             let slot = transaction.slot;
-            let block_time = transaction.block_time.map(|t| Timestamp { seconds: t as i64, nanos: 0 });
+            let block_time =
+                transaction.block_time.map(|t| Timestamp { seconds: t as i64, nanos: 0 });
             let recv_us = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()

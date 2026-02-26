@@ -1,10 +1,7 @@
 use solana_streamer_sdk::streaming::{
     event_parser::{
-        common::{EventType, filter::EventTypeFilter},
-        protocols::meteora_dlmm::{
-            events::discriminators,
-            parser::METEORA_DLMM_PROGRAM_ID,
-        },
+        common::{filter::EventTypeFilter, EventType},
+        protocols::meteora_dlmm::{events::discriminators, parser::METEORA_DLMM_PROGRAM_ID},
         DexEvent, Protocol,
     },
     grpc::ClientConfig,
@@ -69,11 +66,8 @@ async fn subscribe_meteora_dlmm_bin_array_accounts() -> Result<(), Box<dyn std::
     };
 
     // 事件类型过滤器 - 只订阅 BinArray 账户事件
-    let event_type_filter = Some(EventTypeFilter {
-        include: vec![
-            EventType::AccountMeteoraDlmmBinArray,
-        ],
-    });
+    let event_type_filter =
+        Some(EventTypeFilter { include: vec![EventType::AccountMeteoraDlmmBinArray] });
 
     println!("开始监听事件，按 Ctrl+C 停止...");
     println!("监控程序: {}", METEORA_DLMM_PROGRAM_ID);
@@ -114,29 +108,29 @@ fn create_event_callback() -> impl Fn(DexEvent) {
                 println!("BinArray Index: {}", e.bin_array.index);
                 println!("版本: {}", e.bin_array.version);
                 println!("关联 LbPair: {}", e.bin_array.lb_pair);
-                
+
                 // 统计非空的 bin 数量
                 let non_empty_bins: usize = e.bin_array.bins.iter()
                     .filter(|bin| bin.amount_x > 0 || bin.amount_y > 0 || bin.liquidity_supply > 0)
                     .count();
-                
+
                 println!("非空 Bin 数量: {}/70", non_empty_bins);
-                
+
                 // 显示前几个非空 bin 的信息
                 let mut shown = 0;
                 for (idx, bin) in e.bin_array.bins.iter().enumerate() {
                     if (bin.amount_x > 0 || bin.amount_y > 0 || bin.liquidity_supply > 0) && shown < 5 {
-                        println!("  Bin[{}]: X={}, Y={}, Price={}, Liquidity={}", 
-                            idx, 
-                            bin.amount_x, 
-                            bin.amount_y, 
-                            bin.price, 
+                        println!("  Bin[{}]: X={}, Y={}, Price={}, Liquidity={}",
+                            idx,
+                            bin.amount_x,
+                            bin.amount_y,
+                            bin.price,
                             bin.liquidity_supply
                         );
                         shown += 1;
                     }
                 }
-                
+
                 println!("Slot: {}", e.metadata.slot);
                 println!("=====================================");
                 */

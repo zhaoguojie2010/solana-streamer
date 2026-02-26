@@ -741,6 +741,14 @@ impl EventParser {
                     &data[..8],
                 )
             }
+            Protocol::Whirlpool => {
+                if data.len() < 8 {
+                    return false;
+                }
+                crate::streaming::event_parser::protocols::whirlpool::parser::is_whirlpool_swap_instruction(
+                    &data[..8],
+                )
+            }
             _ => false,
         }
     }
@@ -818,6 +826,20 @@ impl EventParser {
                     is_bonk_dev_address_in_signature(&signature, &trade_info.payer);
                 trade_info.is_bot = Some(trade_info.payer) == bot_wallet;
                 DexEvent::BonkTradeEvent(trade_info)
+            }
+            DexEvent::WhirlpoolSwapEvent(mut trade_info) => {
+                if let Some(swap_data) = trade_info.metadata.swap_data.as_mut() {
+                    swap_data.from_amount = trade_info.input_amount;
+                    swap_data.to_amount = trade_info.output_amount;
+                }
+                DexEvent::WhirlpoolSwapEvent(trade_info)
+            }
+            DexEvent::WhirlpoolSwapV2Event(mut trade_info) => {
+                if let Some(swap_data) = trade_info.metadata.swap_data.as_mut() {
+                    swap_data.from_amount = trade_info.input_amount;
+                    swap_data.to_amount = trade_info.output_amount;
+                }
+                DexEvent::WhirlpoolSwapV2Event(trade_info)
             }
             _ => event,
         }
@@ -901,6 +923,42 @@ fn enrich_event_from_program_data(
                         swap_event.sqrt_price_x64 = log_data.sqrt_price_x64;
                         swap_event.liquidity = log_data.liquidity;
                         swap_event.tick = log_data.tick;
+                    }
+                }
+                _ => {}
+            }
+        }
+        Protocol::Whirlpool => {
+            use crate::streaming::event_parser::protocols::whirlpool::parser::parse_traded_event_from_program_data;
+            match event {
+                DexEvent::WhirlpoolSwapEvent(swap_event) => {
+                    if let Some(log_data) =
+                        parse_traded_event_from_program_data(item, &swap_event.whirlpool)
+                    {
+                        swap_event.a_to_b = log_data.a_to_b;
+                        swap_event.pre_sqrt_price = log_data.pre_sqrt_price;
+                        swap_event.post_sqrt_price = log_data.post_sqrt_price;
+                        swap_event.input_amount = log_data.input_amount;
+                        swap_event.output_amount = log_data.output_amount;
+                        swap_event.input_transfer_fee = log_data.input_transfer_fee;
+                        swap_event.output_transfer_fee = log_data.output_transfer_fee;
+                        swap_event.lp_fee = log_data.lp_fee;
+                        swap_event.protocol_fee = log_data.protocol_fee;
+                    }
+                }
+                DexEvent::WhirlpoolSwapV2Event(swap_event) => {
+                    if let Some(log_data) =
+                        parse_traded_event_from_program_data(item, &swap_event.whirlpool)
+                    {
+                        swap_event.a_to_b = log_data.a_to_b;
+                        swap_event.pre_sqrt_price = log_data.pre_sqrt_price;
+                        swap_event.post_sqrt_price = log_data.post_sqrt_price;
+                        swap_event.input_amount = log_data.input_amount;
+                        swap_event.output_amount = log_data.output_amount;
+                        swap_event.input_transfer_fee = log_data.input_transfer_fee;
+                        swap_event.output_transfer_fee = log_data.output_transfer_fee;
+                        swap_event.lp_fee = log_data.lp_fee;
+                        swap_event.protocol_fee = log_data.protocol_fee;
                     }
                 }
                 _ => {}

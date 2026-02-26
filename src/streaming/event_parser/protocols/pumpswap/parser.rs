@@ -26,9 +26,7 @@ pub fn parse_pumpswap_instruction_data(
     match discriminator {
         discriminators::BUY_IX => parse_buy_instruction(data, accounts, metadata),
         discriminators::SELL_IX => parse_sell_instruction(data, accounts, metadata),
-        discriminators::CREATE_POOL_IX => {
-            parse_create_pool_instruction(data, accounts, metadata)
-        }
+        discriminators::CREATE_POOL_IX => parse_create_pool_instruction(data, accounts, metadata),
         discriminators::DEPOSIT_IX => parse_deposit_instruction(data, accounts, metadata),
         discriminators::WITHDRAW_IX => parse_withdraw_instruction(data, accounts, metadata),
         _ => None,
@@ -46,15 +44,12 @@ pub fn parse_pumpswap_inner_instruction_data(
     match discriminator {
         discriminators::BUY_EVENT => parse_buy_inner_instruction(data, metadata),
         discriminators::SELL_EVENT => parse_sell_inner_instruction(data, metadata),
-        discriminators::CREATE_POOL_EVENT => {
-            parse_create_pool_inner_instruction(data, metadata)
-        }
+        discriminators::CREATE_POOL_EVENT => parse_create_pool_inner_instruction(data, metadata),
         discriminators::DEPOSIT_EVENT => parse_deposit_inner_instruction(data, metadata),
         discriminators::WITHDRAW_EVENT => parse_withdraw_inner_instruction(data, metadata),
         _ => None,
     }
 }
-
 
 /// 解析 PumpSwap 账户数据
 ///
@@ -66,10 +61,14 @@ pub fn parse_pumpswap_account_data(
 ) -> Option<crate::streaming::event_parser::DexEvent> {
     match discriminator {
         discriminators::GLOBAL_CONFIG_ACCOUNT => {
-            crate::streaming::event_parser::protocols::pumpswap::types::global_config_parser(account, metadata)
+            crate::streaming::event_parser::protocols::pumpswap::types::global_config_parser(
+                account, metadata,
+            )
         }
         discriminators::POOL_ACCOUNT => {
-            crate::streaming::event_parser::protocols::pumpswap::types::pool_parser(account, metadata)
+            crate::streaming::event_parser::protocols::pumpswap::types::pool_parser(
+                account, metadata,
+            )
         }
         _ => None,
     }
@@ -96,10 +95,7 @@ fn parse_sell_inner_instruction(data: &[u8], metadata: EventMetadata) -> Option<
 }
 
 /// 解析创建池子日志事件
-fn parse_create_pool_inner_instruction(
-    data: &[u8],
-    metadata: EventMetadata,
-) -> Option<DexEvent> {
+fn parse_create_pool_inner_instruction(data: &[u8], metadata: EventMetadata) -> Option<DexEvent> {
     // Note: event_type will be set by instruction parser
     if let Some(event) = pump_swap_create_pool_event_log_decode(data) {
         Some(DexEvent::PumpSwapCreatePoolEvent(PumpSwapCreatePoolEvent { metadata, ..event }))

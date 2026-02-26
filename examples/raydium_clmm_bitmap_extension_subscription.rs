@@ -1,7 +1,5 @@
 use solana_streamer_sdk::streaming::{
-    event_parser::{
-        protocols::raydium_clmm::parser::RAYDIUM_CLMM_PROGRAM_ID, DexEvent, Protocol,
-    },
+    event_parser::{protocols::raydium_clmm::parser::RAYDIUM_CLMM_PROGRAM_ID, DexEvent, Protocol},
     grpc::ClientConfig,
     yellowstone_grpc::{AccountFilter, TransactionFilter},
     YellowstoneGrpc,
@@ -11,7 +9,7 @@ use solana_streamer_sdk::streaming::{
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 初始化日志系统（可选）
     // env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
-    
+
     println!("开始 Raydium CLMM TickArrayBitmapExtension 账户数据订阅示例...");
     subscribe_raydium_clmm_bitmap_extension().await?;
     Ok(())
@@ -54,8 +52,8 @@ async fn subscribe_raydium_clmm_bitmap_extension() -> Result<(), Box<dyn std::er
     };
 
     // 事件类型过滤器 - 只订阅 TickArrayBitmapExtension 账户事件
-    use solana_streamer_sdk::streaming::event_parser::common::EventType;
     use solana_streamer_sdk::streaming::event_parser::common::filter::EventTypeFilter;
+    use solana_streamer_sdk::streaming::event_parser::common::EventType;
     let event_type_filter = Some(EventTypeFilter {
         include: vec![EventType::AccountRaydiumClmmTickArrayBitmapExtension],
     });
@@ -102,27 +100,21 @@ fn create_event_callback() -> impl Fn(DexEvent) {
                 println!("Rent Epoch: {}", e.rent_epoch);
                 println!("Slot: {}", e.metadata.slot);
                 println!("Signature: {}", e.metadata.signature);
-                
+
                 // 由于使用了 #[repr(C, packed)]，需要先复制数据到本地变量
                 let positive_bitmap = e.tick_array_bitmap_extension.positive_tick_array_bitmap;
                 let negative_bitmap = e.tick_array_bitmap_extension.negative_tick_array_bitmap;
-                
+
                 // 打印 positive_tick_array_bitmap 的统计信息
-                let positive_non_zero_count = positive_bitmap
-                    .iter()
-                    .flatten()
-                    .filter(|&&x| x != 0)
-                    .count();
+                let positive_non_zero_count =
+                    positive_bitmap.iter().flatten().filter(|&&x| x != 0).count();
                 println!("Positive Tick Array Bitmap: {} 个非零值", positive_non_zero_count);
-                
+
                 // 打印 negative_tick_array_bitmap 的统计信息
-                let negative_non_zero_count = negative_bitmap
-                    .iter()
-                    .flatten()
-                    .filter(|&&x| x != 0)
-                    .count();
+                let negative_non_zero_count =
+                    negative_bitmap.iter().flatten().filter(|&&x| x != 0).count();
                 println!("Negative Tick Array Bitmap: {} 个非零值", negative_non_zero_count);
-                
+
                 // 可选：打印前几个非零值作为示例
                 println!("\nPositive Bitmap 前 5 个非零值:");
                 let mut count = 0;
@@ -134,7 +126,7 @@ fn create_event_callback() -> impl Fn(DexEvent) {
                         }
                     }
                 }
-                
+
                 println!("\nNegative Bitmap 前 5 个非零值:");
                 let mut count = 0;
                 for (i, row) in negative_bitmap.iter().enumerate() {
@@ -145,7 +137,7 @@ fn create_event_callback() -> impl Fn(DexEvent) {
                         }
                     }
                 }
-                
+
                 println!("=====================================\n");
             }
             _ => {
@@ -155,4 +147,3 @@ fn create_event_callback() -> impl Fn(DexEvent) {
         }
     }
 }
-

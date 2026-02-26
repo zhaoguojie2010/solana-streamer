@@ -109,10 +109,12 @@ impl EventDispatcher {
                 accounts,
                 metadata,
             ),
-            Protocol::Whirlpool => {
-                // Whirlpool 目前不需要解析指令数据，返回 None
-                None
-            }
+            Protocol::Whirlpool => whirlpool::parse_whirlpool_instruction_data(
+                instruction_discriminator,
+                instruction_data,
+                accounts,
+                metadata,
+            ),
         }
     }
 
@@ -190,10 +192,11 @@ impl EventDispatcher {
                 inner_instruction_data,
                 metadata,
             ),
-            Protocol::Whirlpool => {
-                // Whirlpool 目前不需要解析 inner instruction 数据，返回 None
-                None
-            }
+            Protocol::Whirlpool => whirlpool::parse_whirlpool_inner_instruction_data(
+                inner_instruction_discriminator,
+                inner_instruction_data,
+                metadata,
+            ),
         }
     }
 

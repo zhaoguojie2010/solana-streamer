@@ -258,23 +258,24 @@ impl Default for TickArrayBitmapExtension {
     }
 }
 
-pub const TICK_ARRAY_BITMAP_EXTENSION_SIZE: usize = 32 + (EXTENSION_TICKARRAY_BITMAP_SIZE * 8 * 8) + (EXTENSION_TICKARRAY_BITMAP_SIZE * 8 * 8);
+pub const TICK_ARRAY_BITMAP_EXTENSION_SIZE: usize =
+    32 + (EXTENSION_TICKARRAY_BITMAP_SIZE * 8 * 8) + (EXTENSION_TICKARRAY_BITMAP_SIZE * 8 * 8);
 
 pub fn tick_array_bitmap_extension_decode(data: &[u8]) -> Option<TickArrayBitmapExtension> {
     if data.len() < TICK_ARRAY_BITMAP_EXTENSION_SIZE {
         return None;
     }
-    
+
     // 由于使用了 #[repr(C, packed)]，我们需要手动解析
     let mut offset = 0;
-    
+
     // 读取 pool_id (32 bytes)
     if data.len() < offset + 32 {
         return None;
     }
     let pool_id = Pubkey::try_from(&data[offset..offset + 32]).ok()?;
     offset += 32;
-    
+
     // 读取 positive_tick_array_bitmap
     let mut positive_tick_array_bitmap = [[0u64; 8]; EXTENSION_TICKARRAY_BITMAP_SIZE];
     for i in 0..EXTENSION_TICKARRAY_BITMAP_SIZE {
@@ -282,13 +283,12 @@ pub fn tick_array_bitmap_extension_decode(data: &[u8]) -> Option<TickArrayBitmap
             if data.len() < offset + 8 {
                 return None;
             }
-            positive_tick_array_bitmap[i][j] = u64::from_le_bytes(
-                data[offset..offset + 8].try_into().ok()?
-            );
+            positive_tick_array_bitmap[i][j] =
+                u64::from_le_bytes(data[offset..offset + 8].try_into().ok()?);
             offset += 8;
         }
     }
-    
+
     // 读取 negative_tick_array_bitmap
     let mut negative_tick_array_bitmap = [[0u64; 8]; EXTENSION_TICKARRAY_BITMAP_SIZE];
     for i in 0..EXTENSION_TICKARRAY_BITMAP_SIZE {
@@ -296,13 +296,12 @@ pub fn tick_array_bitmap_extension_decode(data: &[u8]) -> Option<TickArrayBitmap
             if data.len() < offset + 8 {
                 return None;
             }
-            negative_tick_array_bitmap[i][j] = u64::from_le_bytes(
-                data[offset..offset + 8].try_into().ok()?
-            );
+            negative_tick_array_bitmap[i][j] =
+                u64::from_le_bytes(data[offset..offset + 8].try_into().ok()?);
             offset += 8;
         }
     }
-    
+
     Some(TickArrayBitmapExtension {
         pool_id,
         positive_tick_array_bitmap,

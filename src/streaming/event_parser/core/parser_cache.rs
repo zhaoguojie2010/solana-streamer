@@ -13,7 +13,7 @@ use crate::streaming::{
     event_parser::{
         common::{filter::EventTypeFilter, EventMetadata, EventType, ProtocolType},
         core::dispatcher::EventDispatcher,
-        Protocol, DexEvent,
+        DexEvent, Protocol,
     },
     grpc::AccountPretty,
 };
@@ -101,9 +101,7 @@ impl AccountPubkeyCache {
     ///
     /// 预分配32个位置，覆盖大多数交易场景
     pub fn new() -> Self {
-        Self {
-            cache: Vec::with_capacity(32),
-        }
+        Self { cache: Vec::with_capacity(32) }
     }
 
     /// 从指令账户索引构建账户公钥向量
@@ -201,4 +199,3 @@ pub struct AccountEventParseConfig {
     /// 账户解析器函数
     pub account_parser: AccountEventParserFn,
 }
-

@@ -1,9 +1,7 @@
 use solana_streamer_sdk::streaming::event_parser::protocols::raydium_cpmm::parser::RAYDIUM_CPMM_PROGRAM_ID;
 use solana_streamer_sdk::streaming::event_parser::{DexEvent, Protocol};
 use solana_streamer_sdk::streaming::{
-    grpc::ClientConfig,
-    yellowstone_grpc::TransactionFilter,
-    YellowstoneGrpc,
+    grpc::ClientConfig, yellowstone_grpc::TransactionFilter, YellowstoneGrpc,
 };
 
 #[tokio::main]
@@ -45,10 +43,7 @@ async fn subscribe_raydium_cpmm_swaps() -> Result<(), Box<dyn std::error::Error>
     use solana_streamer_sdk::streaming::event_parser::common::filter::EventTypeFilter;
     use solana_streamer_sdk::streaming::event_parser::common::EventType;
     let event_type_filter = Some(EventTypeFilter {
-        include: vec![
-            EventType::RaydiumCpmmSwapBaseInput,
-            EventType::RaydiumCpmmSwapBaseOutput,
-        ],
+        include: vec![EventType::RaydiumCpmmSwapBaseInput, EventType::RaydiumCpmmSwapBaseOutput],
     });
 
     println!("开始监听事件，按 Ctrl+C 停止...");
@@ -80,7 +75,7 @@ fn create_event_callback() -> impl Fn(DexEvent) {
                 println!("交易签名: {}", e.metadata.signature);
                 println!("Slot: {}", e.metadata.slot);
                 println!();
-                
+
                 // 指令参数
                 println!("--- 指令参数 ---");
                 if e.amount_in > 0 {
@@ -91,7 +86,7 @@ fn create_event_callback() -> impl Fn(DexEvent) {
                     println!("输出金额: {}", e.amount_out);
                 }
                 println!();
-                
+
                 // 从日志解析的事件数据
                 if e.input_amount > 0 || e.output_amount > 0 {
                     println!("--- 从日志解析的实际数据 ---");
@@ -106,7 +101,7 @@ fn create_event_callback() -> impl Fn(DexEvent) {
                     println!("基于输入: {}", e.base_input);
                     println!();
                 }
-                
+
                 // 账户信息
                 println!("--- 账户信息 ---");
                 println!("付款人: {}", e.payer);

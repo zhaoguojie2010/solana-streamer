@@ -96,54 +96,50 @@ pub fn whirlpool_decode(data: &[u8]) -> Option<Whirlpool> {
     if data.len() < WHIRLPOOL_SIZE {
         return None;
     }
-    
+
     let mut offset = 0;
-    
+
     // whirlpools_config: Pubkey (32 bytes)
     let whirlpools_config = Pubkey::try_from(&data[offset..offset + 32]).ok()?;
     offset += 32;
-    
+
     // whirlpool_bump: [u8; 1] (1 byte)
     let whirlpool_bump = [data[offset]];
     offset += 1;
-    
+
     // tick_spacing: u16 (2 bytes)
     let tick_spacing = u16::from_le_bytes([data[offset], data[offset + 1]]);
     offset += 2;
-    
+
     // fee_tier_index_seed: [u8; 2] (2 bytes)
     let fee_tier_index_seed = [data[offset], data[offset + 1]];
     offset += 2;
-    
+
     // fee_rate: u16 (2 bytes)
     let fee_rate = u16::from_le_bytes([data[offset], data[offset + 1]]);
     offset += 2;
-    
+
     // protocol_fee_rate: u16 (2 bytes)
     let protocol_fee_rate = u16::from_le_bytes([data[offset], data[offset + 1]]);
     offset += 2;
-    
+
     // liquidity: u128 (16 bytes)
     let mut liquidity_bytes = [0u8; 16];
     liquidity_bytes.copy_from_slice(&data[offset..offset + 16]);
     let liquidity = u128::from_le_bytes(liquidity_bytes);
     offset += 16;
-    
+
     // sqrt_price: u128 (16 bytes)
     let mut sqrt_price_bytes = [0u8; 16];
     sqrt_price_bytes.copy_from_slice(&data[offset..offset + 16]);
     let sqrt_price = u128::from_le_bytes(sqrt_price_bytes);
     offset += 16;
-    
+
     // tick_current_index: i32 (4 bytes)
-    let tick_current_index = i32::from_le_bytes([
-        data[offset],
-        data[offset + 1],
-        data[offset + 2],
-        data[offset + 3],
-    ]);
+    let tick_current_index =
+        i32::from_le_bytes([data[offset], data[offset + 1], data[offset + 2], data[offset + 3]]);
     offset += 4;
-    
+
     // protocol_fee_owed_a: u64 (8 bytes)
     let protocol_fee_owed_a = u64::from_le_bytes([
         data[offset],
@@ -156,7 +152,7 @@ pub fn whirlpool_decode(data: &[u8]) -> Option<Whirlpool> {
         data[offset + 7],
     ]);
     offset += 8;
-    
+
     // protocol_fee_owed_b: u64 (8 bytes)
     let protocol_fee_owed_b = u64::from_le_bytes([
         data[offset],
@@ -169,35 +165,35 @@ pub fn whirlpool_decode(data: &[u8]) -> Option<Whirlpool> {
         data[offset + 7],
     ]);
     offset += 8;
-    
+
     // token_mint_a: Pubkey (32 bytes)
     let token_mint_a = Pubkey::try_from(&data[offset..offset + 32]).ok()?;
     offset += 32;
-    
+
     // token_vault_a: Pubkey (32 bytes)
     let token_vault_a = Pubkey::try_from(&data[offset..offset + 32]).ok()?;
     offset += 32;
-    
+
     // fee_growth_global_a: u128 (16 bytes)
     let mut fee_growth_global_a_bytes = [0u8; 16];
     fee_growth_global_a_bytes.copy_from_slice(&data[offset..offset + 16]);
     let fee_growth_global_a = u128::from_le_bytes(fee_growth_global_a_bytes);
     offset += 16;
-    
+
     // token_mint_b: Pubkey (32 bytes)
     let token_mint_b = Pubkey::try_from(&data[offset..offset + 32]).ok()?;
     offset += 32;
-    
+
     // token_vault_b: Pubkey (32 bytes)
     let token_vault_b = Pubkey::try_from(&data[offset..offset + 32]).ok()?;
     offset += 32;
-    
+
     // fee_growth_global_b: u128 (16 bytes)
     let mut fee_growth_global_b_bytes = [0u8; 16];
     fee_growth_global_b_bytes.copy_from_slice(&data[offset..offset + 16]);
     let fee_growth_global_b = u128::from_le_bytes(fee_growth_global_b_bytes);
     offset += 16;
-    
+
     // reward_last_updated_timestamp: u64 (8 bytes)
     let reward_last_updated_timestamp = u64::from_le_bytes([
         data[offset],
@@ -210,7 +206,7 @@ pub fn whirlpool_decode(data: &[u8]) -> Option<Whirlpool> {
         data[offset + 7],
     ]);
     offset += 8;
-    
+
     // reward_infos: [WhirlpoolRewardInfo; NUM_REWARDS] (384 bytes)
     // 检查是否有足够的数据来解析所有奖励信息
     if data.len() < offset + (NUM_REWARDS * WHIRLPOOL_REWARD_INFO_SIZE) {
@@ -221,34 +217,33 @@ pub fn whirlpool_decode(data: &[u8]) -> Option<Whirlpool> {
         );
         return None;
     }
-    
+
     let mut reward_infos = [WhirlpoolRewardInfo::default(); NUM_REWARDS];
     for i in 0..NUM_REWARDS {
-        
         // mint: Pubkey (32 bytes)
         let mint = Pubkey::try_from(&data[offset..offset + 32]).ok()?;
         offset += 32;
-        
+
         // vault: Pubkey (32 bytes)
         let vault = Pubkey::try_from(&data[offset..offset + 32]).ok()?;
         offset += 32;
-        
+
         // authority: Pubkey (32 bytes)
         let authority = Pubkey::try_from(&data[offset..offset + 32]).ok()?;
         offset += 32;
-        
+
         // emissions_per_second_x64: u128 (16 bytes)
         let mut emissions_bytes = [0u8; 16];
         emissions_bytes.copy_from_slice(&data[offset..offset + 16]);
         let emissions_per_second_x64 = u128::from_le_bytes(emissions_bytes);
         offset += 16;
-        
+
         // growth_global_x64: u128 (16 bytes)
         let mut growth_bytes = [0u8; 16];
         growth_bytes.copy_from_slice(&data[offset..offset + 16]);
         let growth_global_x64 = u128::from_le_bytes(growth_bytes);
         offset += 16;
-        
+
         reward_infos[i] = WhirlpoolRewardInfo {
             mint,
             vault,
@@ -257,7 +252,7 @@ pub fn whirlpool_decode(data: &[u8]) -> Option<Whirlpool> {
             growth_global_x64,
         };
     }
-    
+
     Some(Whirlpool {
         whirlpools_config,
         whirlpool_bump,
@@ -294,14 +289,14 @@ pub fn whirlpool_parser(account: AccountPretty, mut metadata: EventMetadata) -> 
         );
         return None;
     }
-    
+
     log::debug!(
         "开始解析 Whirlpool 账户: pubkey={}, 数据长度={}, 期望长度={}",
         account.pubkey,
         account.data.len(),
         expected_size
     );
-    
+
     // 跳过前 8 字节的 discriminator，解析接下来的 645 字节
     if let Some(whirlpool) = whirlpool_decode(&account.data[8..8 + WHIRLPOOL_SIZE]) {
         Some(DexEvent::WhirlpoolAccountEvent(WhirlpoolAccountEvent {
@@ -350,18 +345,16 @@ pub fn whirlpool_tick_array_parser(
     if let Some(tick_array) =
         whirlpool_tick_array_decode(&account.data[8..8 + WHIRLPOOL_TICK_ARRAY_SIZE])
     {
-        Some(DexEvent::WhirlpoolTickArrayAccountEvent(
-            WhirlpoolTickArrayAccountEvent {
-                metadata,
-                pubkey: account.pubkey,
-                executable: account.executable,
-                lamports: account.lamports,
-                owner: account.owner,
-                rent_epoch: account.rent_epoch,
-                raw_account_data: account.data,
-                tick_array,
-            },
-        ))
+        Some(DexEvent::WhirlpoolTickArrayAccountEvent(WhirlpoolTickArrayAccountEvent {
+            metadata,
+            pubkey: account.pubkey,
+            executable: account.executable,
+            lamports: account.lamports,
+            owner: account.owner,
+            rent_epoch: account.rent_epoch,
+            raw_account_data: account.data,
+            tick_array,
+        }))
     } else {
         log::warn!(
             "Whirlpool TickArray 账户数据解析失败: pubkey={}, 数据长度={}",

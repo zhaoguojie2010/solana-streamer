@@ -1,7 +1,5 @@
 use solana_streamer_sdk::streaming::{
-    event_parser::{
-        protocols::whirlpool::parser::WHIRLPOOL_PROGRAM_ID, DexEvent, Protocol,
-    },
+    event_parser::{protocols::whirlpool::parser::WHIRLPOOL_PROGRAM_ID, DexEvent, Protocol},
     grpc::ClientConfig,
     yellowstone_grpc::{AccountFilter, TransactionFilter},
     YellowstoneGrpc,
@@ -45,11 +43,10 @@ async fn subscribe_whirlpool_tick_array_accounts() -> Result<(), Box<dyn std::er
         account_required: vec![],
     };
 
-    use solana_streamer_sdk::streaming::event_parser::common::EventType;
     use solana_streamer_sdk::streaming::event_parser::common::filter::EventTypeFilter;
-    let event_type_filter = Some(EventTypeFilter {
-        include: vec![EventType::AccountWhirlpoolTickArray],
-    });
+    use solana_streamer_sdk::streaming::event_parser::common::EventType;
+    let event_type_filter =
+        Some(EventTypeFilter { include: vec![EventType::AccountWhirlpoolTickArray] });
 
     println!("开始监听事件，按 Ctrl+C 停止...");
     println!("监控程序: {}", WHIRLPOOL_PROGRAM_ID);
@@ -80,12 +77,8 @@ async fn subscribe_whirlpool_tick_array_accounts() -> Result<(), Box<dyn std::er
 fn create_event_callback() -> impl Fn(DexEvent) {
     |event: DexEvent| match event {
         DexEvent::WhirlpoolTickArrayAccountEvent(e) => {
-            let initialized_ticks = e
-                .tick_array
-                .ticks
-                .iter()
-                .filter(|tick| tick.initialized)
-                .count();
+            let initialized_ticks =
+                e.tick_array.ticks.iter().filter(|tick| tick.initialized).count();
             println!("=== Whirlpool TickArray 账户更新 ===");
             println!("账户地址: {}", e.pubkey);
             println!("Whirlpool: {}", e.tick_array.whirlpool);

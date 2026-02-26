@@ -96,6 +96,8 @@ pub enum DexEvent {
     MeteoraDlmmBinArrayBitmapExtensionAccountEvent(MeteoraDlmmBinArrayBitmapExtensionAccountEvent),
 
     // Whirlpool events
+    WhirlpoolSwapEvent(WhirlpoolSwapEvent),
+    WhirlpoolSwapV2Event(WhirlpoolSwapV2Event),
     WhirlpoolAccountEvent(WhirlpoolAccountEvent),
     WhirlpoolTickArrayAccountEvent(WhirlpoolTickArrayAccountEvent),
 
@@ -165,6 +167,8 @@ impl DexEvent {
             DexEvent::MeteoraDlmmLbPairAccountEvent(e) => &e.metadata,
             DexEvent::MeteoraDlmmBinArrayAccountEvent(e) => &e.metadata,
             DexEvent::MeteoraDlmmBinArrayBitmapExtensionAccountEvent(e) => &e.metadata,
+            DexEvent::WhirlpoolSwapEvent(e) => &e.metadata,
+            DexEvent::WhirlpoolSwapV2Event(e) => &e.metadata,
             DexEvent::WhirlpoolAccountEvent(e) => &e.metadata,
             DexEvent::WhirlpoolTickArrayAccountEvent(e) => &e.metadata,
             DexEvent::TokenAccountEvent(e) => &e.metadata,
@@ -232,6 +236,8 @@ impl DexEvent {
             DexEvent::MeteoraDlmmLbPairAccountEvent(e) => &mut e.metadata,
             DexEvent::MeteoraDlmmBinArrayAccountEvent(e) => &mut e.metadata,
             DexEvent::MeteoraDlmmBinArrayBitmapExtensionAccountEvent(e) => &mut e.metadata,
+            DexEvent::WhirlpoolSwapEvent(e) => &mut e.metadata,
+            DexEvent::WhirlpoolSwapV2Event(e) => &mut e.metadata,
             DexEvent::WhirlpoolAccountEvent(e) => &mut e.metadata,
             DexEvent::WhirlpoolTickArrayAccountEvent(e) => &mut e.metadata,
             DexEvent::TokenAccountEvent(e) => &mut e.metadata,

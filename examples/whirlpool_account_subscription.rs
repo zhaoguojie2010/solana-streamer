@@ -1,7 +1,5 @@
 use solana_streamer_sdk::streaming::{
-    event_parser::{
-        protocols::whirlpool::parser::WHIRLPOOL_PROGRAM_ID, DexEvent, Protocol,
-    },
+    event_parser::{protocols::whirlpool::parser::WHIRLPOOL_PROGRAM_ID, DexEvent, Protocol},
     grpc::ClientConfig,
     yellowstone_grpc::{AccountFilter, TransactionFilter},
     YellowstoneGrpc,
@@ -11,7 +9,7 @@ use solana_streamer_sdk::streaming::{
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 初始化日志系统，设置日志级别为 debug 以便查看详细信息
     //env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("debug")).init();
-    
+
     println!("开始 Whirlpool 账户数据订阅示例...");
     subscribe_whirlpool_accounts().await?;
     Ok(())
@@ -54,11 +52,9 @@ async fn subscribe_whirlpool_accounts() -> Result<(), Box<dyn std::error::Error>
     };
 
     // 事件类型过滤器 - 只订阅账户事件
-    use solana_streamer_sdk::streaming::event_parser::common::EventType;
     use solana_streamer_sdk::streaming::event_parser::common::filter::EventTypeFilter;
-    let event_type_filter = Some(EventTypeFilter {
-        include: vec![EventType::AccountWhirlpool],
-    });
+    use solana_streamer_sdk::streaming::event_parser::common::EventType;
+    let event_type_filter = Some(EventTypeFilter { include: vec![EventType::AccountWhirlpool] });
 
     println!("开始监听事件，按 Ctrl+C 停止...");
     println!("监控程序: {}", WHIRLPOOL_PROGRAM_ID);
@@ -115,13 +111,22 @@ fn create_event_callback() -> impl Fn(DexEvent) {
                 println!("Protocol Fee Owed B: {}", e.whirlpool.protocol_fee_owed_b);
                 println!("Fee Growth Global A: {}", e.whirlpool.fee_growth_global_a);
                 println!("Fee Growth Global B: {}", e.whirlpool.fee_growth_global_b);
-                println!("Reward Last Updated Timestamp: {}", e.whirlpool.reward_last_updated_timestamp);
+                println!(
+                    "Reward Last Updated Timestamp: {}",
+                    e.whirlpool.reward_last_updated_timestamp
+                );
                 println!("奖励信息数量: {}", e.whirlpool.reward_infos.len());
                 for (i, reward_info) in e.whirlpool.reward_infos.iter().enumerate() {
                     if reward_info.mint != solana_sdk::pubkey::Pubkey::default() {
-                        println!("  奖励 {}: Mint={}, Vault={}, Authority={}, Emissions={}, Growth={}",
-                            i, reward_info.mint, reward_info.vault, reward_info.authority,
-                            reward_info.emissions_per_second_x64, reward_info.growth_global_x64);
+                        println!(
+                            "  奖励 {}: Mint={}, Vault={}, Authority={}, Emissions={}, Growth={}",
+                            i,
+                            reward_info.mint,
+                            reward_info.vault,
+                            reward_info.authority,
+                            reward_info.emissions_per_second_x64,
+                            reward_info.growth_global_x64
+                        );
                     }
                 }
                 println!("=====================================");

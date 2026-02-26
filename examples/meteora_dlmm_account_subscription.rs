@@ -1,9 +1,6 @@
 use solana_streamer_sdk::streaming::{
     event_parser::{
-        protocols::meteora_dlmm::{
-            events::discriminators,
-            parser::METEORA_DLMM_PROGRAM_ID,
-        },
+        protocols::meteora_dlmm::{events::discriminators, parser::METEORA_DLMM_PROGRAM_ID},
         DexEvent, Protocol,
     },
     grpc::ClientConfig,
@@ -48,7 +45,7 @@ async fn subscribe_meteora_dlmm_accounts() -> Result<(), Box<dyn std::error::Err
     // 账户过滤器 - 只订阅 LbPair 和 BinArrayBitmapExtension，不订阅 BinArray
     // 使用 Memcmp 过滤器在 gRPC 层面过滤，只匹配 LbPair 和 BinArrayBitmapExtension 的 discriminator
     // 这样可以减小 gRPC streaming 压力，避免接收 BinArray 账户
-    
+
     // 创建 LbPair 账户过滤器
     let lb_pair_filter = AccountFilter {
         account: vec![],
@@ -83,8 +80,8 @@ async fn subscribe_meteora_dlmm_accounts() -> Result<(), Box<dyn std::error::Err
     };
 
     // 事件类型过滤器 - 只订阅账户事件
-    use solana_streamer_sdk::streaming::event_parser::common::EventType;
     use solana_streamer_sdk::streaming::event_parser::common::filter::EventTypeFilter;
+    use solana_streamer_sdk::streaming::event_parser::common::EventType;
     let event_type_filter = Some(EventTypeFilter {
         include: vec![
             EventType::AccountMeteoraDlmmLbPair,
@@ -149,7 +146,10 @@ fn create_event_callback() -> impl Fn(DexEvent) {
             DexEvent::MeteoraDlmmBinArrayBitmapExtensionAccountEvent(e) => {
                 println!("=== Meteora DLMM BinArrayBitmapExtension 账户更新 ===");
                 println!("账户地址: {}", e.pubkey);
-                println!("Bin Array Bitmap: {:?}", e.bin_array_bitmap_extension.positive_bin_array_bitmap);
+                println!(
+                    "Bin Array Bitmap: {:?}",
+                    e.bin_array_bitmap_extension.positive_bin_array_bitmap
+                );
                 println!("=====================================");
             }
             _ => {

@@ -39,9 +39,7 @@ pub fn parse_raydium_cpmm_instruction_data(
     metadata: EventMetadata,
 ) -> Option<DexEvent> {
     match discriminator {
-        discriminators::SWAP_BASE_IN => {
-            parse_swap_base_input_instruction(data, accounts, metadata)
-        }
+        discriminators::SWAP_BASE_IN => parse_swap_base_input_instruction(data, accounts, metadata),
         discriminators::SWAP_BASE_OUT => {
             parse_swap_base_output_instruction(data, accounts, metadata)
         }
@@ -53,10 +51,7 @@ pub fn parse_raydium_cpmm_instruction_data(
 }
 
 pub fn is_raydium_cpmm_swap_instruction(discriminator: &[u8]) -> bool {
-    matches!(
-        discriminator,
-        discriminators::SWAP_BASE_IN | discriminators::SWAP_BASE_OUT
-    )
+    matches!(discriminator, discriminators::SWAP_BASE_IN | discriminators::SWAP_BASE_OUT)
 }
 
 /// 解析 Raydium CPMM inner instruction data
@@ -70,7 +65,6 @@ pub fn parse_raydium_cpmm_inner_instruction_data(
     None
 }
 
-
 /// 解析 Raydium CPMM 账户数据
 ///
 /// 根据判别器路由到具体的账户解析函数
@@ -81,15 +75,18 @@ pub fn parse_raydium_cpmm_account_data(
 ) -> Option<crate::streaming::event_parser::DexEvent> {
     match discriminator {
         discriminators::AMM_CONFIG => {
-            crate::streaming::event_parser::protocols::raydium_cpmm::types::amm_config_parser(account, metadata)
+            crate::streaming::event_parser::protocols::raydium_cpmm::types::amm_config_parser(
+                account, metadata,
+            )
         }
         discriminators::POOL_STATE => {
-            crate::streaming::event_parser::protocols::raydium_cpmm::types::pool_state_parser(account, metadata)
+            crate::streaming::event_parser::protocols::raydium_cpmm::types::pool_state_parser(
+                account, metadata,
+            )
         }
         _ => None,
     }
 }
-
 
 /// 解析提款指令事件
 fn parse_withdraw_instruction(
@@ -274,17 +271,17 @@ pub fn parse_swap_event_from_log(log_data_base64: &str) -> Option<SwapEventLogDa
     // 解码 base64
     use base64::{engine::general_purpose::STANDARD, Engine};
     let decoded = STANDARD.decode(log_data_base64).ok()?;
-    
+
     // 检查长度和鉴别器
     if decoded.len() < 8 {
         return None;
     }
-    
+
     // 验证鉴别器
     if &decoded[0..8] != discriminators::SWAP_EVENT {
         return None;
     }
-    
+
     // 解析事件数据
     // SwapEvent 结构（从 raydium-cp-swap 源码）:
     // - pool_id: Pubkey (32 bytes)
@@ -300,42 +297,42 @@ pub fn parse_swap_event_from_log(log_data_base64: &str) -> Option<SwapEventLogDa
     // - trade_fee: u64 (8 bytes)
     // - creator_fee: u64 (8 bytes)
     // - creator_fee_on_input: bool (1 byte)
-    
+
     let pool_id = Pubkey::new_from_array(decoded.get(8..40)?.try_into().ok()?);
     let mut offset = 8 + 32; // 跳过鉴别器和 pool_id
-    
+
     let input_vault_before = read_u64_le(&decoded, offset)?;
     offset += 8;
-    
+
     let output_vault_before = read_u64_le(&decoded, offset)?;
     offset += 8;
-    
+
     let input_amount = read_u64_le(&decoded, offset)?;
     offset += 8;
-    
+
     let output_amount = read_u64_le(&decoded, offset)?;
     offset += 8;
-    
+
     let input_transfer_fee = read_u64_le(&decoded, offset)?;
     offset += 8;
-    
+
     let output_transfer_fee = read_u64_le(&decoded, offset)?;
     offset += 8;
-    
+
     let base_input = read_u8(&decoded, offset)? != 0;
     offset += 1;
-    
+
     offset += 32; // 跳过 input_mint
     offset += 32; // 跳过 output_mint
-    
+
     let trade_fee = read_u64_le(&decoded, offset)?;
     offset += 8;
-    
+
     let creator_fee = read_u64_le(&decoded, offset)?;
     offset += 8;
-    
+
     let creator_fee_on_input = read_u8(&decoded, offset)? != 0;
-    
+
     Some(SwapEventLogData {
         pool_id,
         input_vault_before,

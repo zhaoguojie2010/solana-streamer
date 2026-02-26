@@ -1,9 +1,7 @@
 use solana_streamer_sdk::streaming::event_parser::protocols::raydium_clmm::parser::RAYDIUM_CLMM_PROGRAM_ID;
 use solana_streamer_sdk::streaming::event_parser::{DexEvent, Protocol};
 use solana_streamer_sdk::streaming::{
-    grpc::ClientConfig,
-    yellowstone_grpc::TransactionFilter,
-    YellowstoneGrpc,
+    grpc::ClientConfig, yellowstone_grpc::TransactionFilter, YellowstoneGrpc,
 };
 
 #[tokio::main]
