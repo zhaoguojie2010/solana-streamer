@@ -361,6 +361,8 @@ pub struct EventMetadata {
     pub swap_data: Option<SwapData>,
     pub outer_index: i64,
     pub inner_index: Option<i64>,
+    #[serde(default)]
+    pub is_arb_leg: bool,
 }
 
 impl EventMetadata {
@@ -392,6 +394,7 @@ impl EventMetadata {
             outer_index,
             inner_index,
             transaction_index,
+            is_arb_leg: false,
         }
     }
 

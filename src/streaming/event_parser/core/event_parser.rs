@@ -26,6 +26,13 @@ use yellowstone_grpc_proto::geyser::SubscribeUpdateTransactionInfo;
 
 pub struct EventParser {}
 
+#[derive(Clone, Copy)]
+struct MintLeg {
+    event_index: usize,
+    from_mint: Pubkey,
+    to_mint: Pubkey,
+}
+
 impl EventParser {
     // ================================================================================================
     // Public API - Entry Points
@@ -279,6 +286,8 @@ impl EventParser {
                     }
                     // Immediately process inner instructions for correct ordering
                     if let Some(inner_instructions) = inner_instructions {
+                        let mut inner_events: Vec<DexEvent> =
+                            Vec::with_capacity(inner_instructions.instructions.len());
                         for (inner_index, inner_instruction) in
                             inner_instructions.instructions.iter().enumerate()
                         {
@@ -310,7 +319,7 @@ impl EventParser {
                                     }
                                 }
                             }
-                            Self::parse_events_from_grpc_instruction(
+                            if let Some(inner_event) = Self::parse_event_from_grpc_instruction(
                                 protocols,
                                 event_type_filter,
                                 &instruction,
@@ -325,8 +334,14 @@ impl EventParser {
                                 transaction_index,
                                 Some(&inner_instructions),
                                 program_data_index.as_ref(),
-                                callback.clone(),
-                            )?;
+                            )? {
+                                inner_events.push(inner_event);
+                            }
+                        }
+
+                        Self::mark_arb_inner_swap_events(&mut inner_events);
+                        for inner_event in inner_events.iter() {
+                            callback(inner_event);
                         }
                     }
                 }
@@ -357,14 +372,53 @@ impl EventParser {
         program_data_index: Option<&ProgramDataIndex>,
         callback: Arc<dyn for<'a> Fn(&'a DexEvent) + Send + Sync>,
     ) -> anyhow::Result<()> {
+        if let Some(event) = Self::parse_event_from_grpc_instruction(
+            protocols,
+            event_type_filter,
+            instruction,
+            accounts,
+            signature,
+            slot,
+            block_time,
+            recv_us,
+            outer_index,
+            inner_index,
+            bot_wallet,
+            transaction_index,
+            inner_instructions,
+            program_data_index,
+        )? {
+            callback(&event);
+        }
+
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn parse_event_from_grpc_instruction(
+        protocols: &[Protocol],
+        event_type_filter: Option<&EventTypeFilter>,
+        instruction: &yellowstone_grpc_proto::prelude::CompiledInstruction,
+        accounts: &[Pubkey],
+        signature: Signature,
+        slot: u64,
+        block_time: Option<Timestamp>,
+        recv_us: i64,
+        outer_index: i64,
+        inner_index: Option<i64>,
+        bot_wallet: Option<Pubkey>,
+        transaction_index: Option<u64>,
+        inner_instructions: Option<&yellowstone_grpc_proto::prelude::InnerInstructions>,
+        program_data_index: Option<&ProgramDataIndex>,
+    ) -> anyhow::Result<Option<DexEvent>> {
         // 添加边界检查以防止越界访问
         let program_id_index = instruction.program_id_index as usize;
         if program_id_index >= accounts.len() {
-            return Ok(());
+            return Ok(None);
         }
         let program_id = accounts[program_id_index];
         if !Self::should_handle(protocols, event_type_filter, &program_id) {
-            return Ok(());
+            return Ok(None);
         }
 
         let is_cu_program = EventDispatcher::is_compute_budget_program(&program_id);
@@ -376,7 +430,7 @@ impl EventParser {
 
         // 检查指令数据长度（至少需要 disc_len 字节的 discriminator）
         if !is_cu_program && instruction.data.len() < disc_len {
-            return Ok(());
+            return Ok(None);
         }
         // 创建元数据
         let timestamp = block_time.unwrap_or(Timestamp { seconds: 0, nanos: 0 });
@@ -396,19 +450,16 @@ impl EventParser {
         );
 
         if is_cu_program {
-            if let Some(event) = EventDispatcher::dispatch_compute_budget_instruction(
+            return Ok(EventDispatcher::dispatch_compute_budget_instruction(
                 &instruction.data,
                 metadata.clone(),
-            ) {
-                callback(&event);
-            }
-            return Ok(());
+            ));
         }
 
         // 使用 EventDispatcher 匹配协议
         let protocol = match EventDispatcher::match_protocol_by_program_id(&program_id) {
             Some(p) => p,
-            None => return Ok(()),
+            None => return Ok(None),
         };
 
         // 提取 discriminator 和数据
@@ -431,7 +482,7 @@ impl EventParser {
             metadata.clone(),
         ) {
             Some(e) => e,
-            None => return Ok(()),
+            None => return Ok(None),
         };
 
         enrich_event_from_program_data(
@@ -503,7 +554,7 @@ impl EventParser {
             const PUMPFUN_MIGRATE_IX: &[u8] = &[155, 234, 231, 146, 236, 158, 162, 30];
             if instruction_discriminator == PUMPFUN_MIGRATE_IX && inner_instruction_event.is_none()
             {
-                return Ok(());
+                return Ok(None);
             }
         }
 
@@ -515,9 +566,7 @@ impl EventParser {
         // 设置处理时间（使用高性能时钟）
         event.metadata_mut().handle_us = elapsed_micros_since(recv_us);
         event = Self::process_event(event, bot_wallet);
-        callback(&event);
-
-        Ok(())
+        Ok(Some(event))
     }
 
     // ================================================================================================
@@ -721,6 +770,68 @@ impl EventParser {
         } else {
             false
         }
+    }
+
+    #[inline]
+    fn extract_swap_mints(event: &DexEvent) -> Option<(Pubkey, Pubkey)> {
+        let swap_data = event.metadata().swap_data.as_ref()?;
+        if swap_data.from_mint == Pubkey::default() || swap_data.to_mint == Pubkey::default() {
+            return None;
+        }
+        Some((swap_data.from_mint, swap_data.to_mint))
+    }
+
+    fn mark_arb_segment(events: &mut [DexEvent], legs: &[MintLeg]) {
+        if legs.len() < 2 {
+            return;
+        }
+        let Some(first_leg) = legs.first() else {
+            return;
+        };
+        let Some(last_leg) = legs.last() else {
+            return;
+        };
+        if first_leg.from_mint != last_leg.to_mint {
+            return;
+        }
+
+        for leg in legs.iter() {
+            events[leg.event_index].metadata_mut().is_arb_leg = true;
+        }
+    }
+
+    #[inline]
+    fn mark_arb_inner_swap_events(events: &mut [DexEvent]) {
+        let mut segment_legs: Vec<MintLeg> = Vec::new();
+        for event_index in 0..events.len() {
+            let (is_inner, swap_mints) = {
+                let event = &events[event_index];
+                let metadata = event.metadata();
+                (metadata.inner_index.is_some(), Self::extract_swap_mints(event))
+            };
+
+            if !is_inner {
+                continue;
+            }
+
+            let Some((from_mint, to_mint)) = swap_mints else {
+                Self::mark_arb_segment(events, &segment_legs);
+                segment_legs.clear();
+                continue;
+            };
+
+            let next_leg = MintLeg { event_index, from_mint, to_mint };
+
+            if let Some(last_leg) = segment_legs.last() {
+                if last_leg.to_mint != next_leg.from_mint {
+                    Self::mark_arb_segment(events, &segment_legs);
+                    segment_legs.clear();
+                }
+            }
+            segment_legs.push(next_leg);
+        }
+
+        Self::mark_arb_segment(events, &segment_legs);
     }
 
     fn instruction_needs_program_data(protocol: &Protocol, data: &[u8]) -> bool {
