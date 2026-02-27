@@ -1,8 +1,7 @@
 use crate::streaming::event_parser::{
     common::{
         build_program_data_index, filter::EventTypeFilter,
-        high_performance_clock::elapsed_micros_since, parse_swap_data_from_next_grpc_instructions,
-        parse_swap_data_from_next_instructions, EventMetadata, ProgramDataIndex,
+        high_performance_clock::elapsed_micros_since, EventMetadata, ProgramDataIndex,
     },
     core::{
         dispatcher::EventDispatcher,
@@ -493,59 +492,29 @@ impl EventParser {
             inner_index,
         );
 
-        // 处理 inner instructions
+        // 处理 inner instructions（默认不提取 swap_data，保持 metadata.swap_data=None）
         let mut inner_instruction_event: Option<DexEvent> = None;
         if let Some(inner_instructions_ref) = inner_instructions {
-            // 并行执行两个任务: 解析 inner event 和提取 swap_data
-            let (inner_event_result, swap_data_result) = std::thread::scope(|s| {
-                let start_idx = inner_index
-                    .and_then(|i| if i >= 0 { Some((i as usize).saturating_add(1)) } else { None })
-                    .unwrap_or(0);
-                let protocol_for_inner = protocol.clone();
-                let inner_event_handle = s.spawn(move || {
-                    for inner_instruction in
-                        inner_instructions_ref.instructions.iter().skip(start_idx)
-                    {
-                        let inner_data = &inner_instruction.data;
-                        // 检查长度（需要 16 字节的 discriminator）
-                        if inner_data.len() < 16 {
-                            continue;
-                        }
-                        let inner_discriminator = &inner_data[..16];
-                        let inner_instruction_data = &inner_data[16..];
-
-                        if let Some(inner_event) = EventDispatcher::dispatch_inner_instruction(
-                            protocol_for_inner.clone(),
-                            inner_discriminator,
-                            inner_instruction_data,
-                            metadata.clone(),
-                        ) {
-                            return Some(inner_event);
-                        }
-                    }
-                    None
-                });
-
-                let swap_data_handle = s.spawn(|| {
-                    if event.metadata().swap_data.is_none() {
-                        parse_swap_data_from_next_grpc_instructions(
-                            &event,
-                            inner_instructions_ref,
-                            inner_index.unwrap_or(-1_i64) as i8,
-                            accounts,
-                        )
-                    } else {
-                        None
-                    }
-                });
-
-                // 等待两个任务完成
-                (inner_event_handle.join().unwrap(), swap_data_handle.join().unwrap())
-            });
-
-            inner_instruction_event = inner_event_result;
-            if let Some(swap_data) = swap_data_result {
-                event.metadata_mut().set_swap_data(swap_data);
+            let start_idx = inner_index
+                .and_then(|i| if i >= 0 { Some((i as usize).saturating_add(1)) } else { None })
+                .unwrap_or(0);
+            for inner_instruction in inner_instructions_ref.instructions.iter().skip(start_idx) {
+                let inner_data = &inner_instruction.data;
+                // 检查长度（需要 16 字节的 discriminator）
+                if inner_data.len() < 16 {
+                    continue;
+                }
+                let inner_discriminator = &inner_data[..16];
+                let inner_instruction_data = &inner_data[16..];
+                if let Some(inner_event) = EventDispatcher::dispatch_inner_instruction(
+                    protocol.clone(),
+                    inner_discriminator,
+                    inner_instruction_data,
+                    metadata.clone(),
+                ) {
+                    inner_instruction_event = Some(inner_event);
+                    break;
+                }
             }
         }
 
@@ -672,59 +641,29 @@ impl EventParser {
             None => return Ok(()),
         };
 
-        // 处理 inner instructions
+        // 处理 inner instructions（默认不提取 swap_data，保持 metadata.swap_data=None）
         let mut inner_instruction_event: Option<DexEvent> = None;
         if let Some(inner_instructions_ref) = inner_instructions {
-            // 并行执行两个任务: 解析 inner event 和提取 swap_data
-            let (inner_event_result, swap_data_result) = std::thread::scope(|s| {
-                let start_idx = inner_index
-                    .and_then(|i| if i >= 0 { Some((i as usize).saturating_add(1)) } else { None })
-                    .unwrap_or(0);
-                let protocol_for_inner = protocol.clone();
-                let inner_event_handle = s.spawn(move || {
-                    for inner_instruction in
-                        inner_instructions_ref.instructions.iter().skip(start_idx)
-                    {
-                        let inner_data = &inner_instruction.instruction.data;
-                        // 检查长度（需要 16 字节的 discriminator）
-                        if inner_data.len() < 16 {
-                            continue;
-                        }
-                        let inner_discriminator = &inner_data[..16];
-                        let inner_instruction_data = &inner_data[16..];
-
-                        if let Some(inner_event) = EventDispatcher::dispatch_inner_instruction(
-                            protocol_for_inner.clone(),
-                            inner_discriminator,
-                            inner_instruction_data,
-                            metadata.clone(),
-                        ) {
-                            return Some(inner_event);
-                        }
-                    }
-                    None
-                });
-
-                let swap_data_handle = s.spawn(|| {
-                    if event.metadata().swap_data.is_none() {
-                        parse_swap_data_from_next_instructions(
-                            &event,
-                            inner_instructions_ref,
-                            inner_index.unwrap_or(-1_i64) as i8,
-                            accounts,
-                        )
-                    } else {
-                        None
-                    }
-                });
-
-                // 等待两个任务完成
-                (inner_event_handle.join().unwrap(), swap_data_handle.join().unwrap())
-            });
-
-            inner_instruction_event = inner_event_result;
-            if let Some(swap_data) = swap_data_result {
-                event.metadata_mut().set_swap_data(swap_data);
+            let start_idx = inner_index
+                .and_then(|i| if i >= 0 { Some((i as usize).saturating_add(1)) } else { None })
+                .unwrap_or(0);
+            for inner_instruction in inner_instructions_ref.instructions.iter().skip(start_idx) {
+                let inner_data = &inner_instruction.instruction.data;
+                // 检查长度（需要 16 字节的 discriminator）
+                if inner_data.len() < 16 {
+                    continue;
+                }
+                let inner_discriminator = &inner_data[..16];
+                let inner_instruction_data = &inner_data[16..];
+                if let Some(inner_event) = EventDispatcher::dispatch_inner_instruction(
+                    protocol.clone(),
+                    inner_discriminator,
+                    inner_instruction_data,
+                    metadata.clone(),
+                ) {
+                    inner_instruction_event = Some(inner_event);
+                    break;
+                }
             }
         }
 
@@ -774,11 +713,47 @@ impl EventParser {
 
     #[inline]
     fn extract_swap_mints(event: &DexEvent) -> Option<(Pubkey, Pubkey)> {
-        let swap_data = event.metadata().swap_data.as_ref()?;
-        if swap_data.from_mint == Pubkey::default() || swap_data.to_mint == Pubkey::default() {
-            return None;
+        let (from_mint, to_mint) = match event {
+            DexEvent::PumpSwapBuyEvent(e) => (e.quote_mint, e.base_mint),
+            DexEvent::PumpSwapSellEvent(e) => (e.base_mint, e.quote_mint),
+            DexEvent::BonkTradeEvent(e) => match e.trade_direction {
+                crate::streaming::event_parser::protocols::bonk::types::TradeDirection::Buy => {
+                    (e.quote_token_mint, e.base_token_mint)
+                }
+                crate::streaming::event_parser::protocols::bonk::types::TradeDirection::Sell => {
+                    (e.base_token_mint, e.quote_token_mint)
+                }
+            },
+            DexEvent::RaydiumCpmmSwapEvent(e) => (e.input_token_mint, e.output_token_mint),
+            DexEvent::RaydiumClmmSwapV2Event(e) => (e.input_vault_mint, e.output_vault_mint),
+            DexEvent::MeteoraDlmmSwapEvent(e) => {
+                if e.swap_for_y {
+                    (e.token_x_mint?, e.token_y_mint?)
+                } else {
+                    (e.token_y_mint?, e.token_x_mint?)
+                }
+            }
+            DexEvent::MeteoraDlmmSwap2Event(e) => {
+                if e.swap_for_y {
+                    (e.token_x_mint?, e.token_y_mint?)
+                } else {
+                    (e.token_y_mint?, e.token_x_mint?)
+                }
+            }
+            DexEvent::WhirlpoolSwapV2Event(e) => {
+                if e.a_to_b {
+                    (e.token_mint_a, e.token_mint_b)
+                } else {
+                    (e.token_mint_b, e.token_mint_a)
+                }
+            }
+            _ => return None,
+        };
+        if from_mint == Pubkey::default() || to_mint == Pubkey::default() {
+            None
+        } else {
+            Some((from_mint, to_mint))
         }
-        Some((swap_data.from_mint, swap_data.to_mint))
     }
 
     fn mark_arb_segment(events: &mut [DexEvent], legs: &[MintLeg]) {

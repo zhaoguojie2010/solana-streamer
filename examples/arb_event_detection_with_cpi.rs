@@ -1,5 +1,6 @@
 use solana_streamer_sdk::streaming::event_parser::{
     common::EventType,
+    protocols::bonk::types::TradeDirection,
     protocols::{
         bonk::parser::BONK_PROGRAM_ID, meteora_damm_v2::parser::METEORA_DAMM_V2_PROGRAM_ID,
         meteora_dlmm::parser::METEORA_DLMM_PROGRAM_ID, pumpfun::parser::PUMPFUN_PROGRAM_ID,
@@ -129,10 +130,8 @@ fn create_arb_callback() -> impl Fn(DexEvent) + Send + Sync + 'static {
         let Some(pool_id) = extract_pool_id(&event) else {
             return;
         };
-        let (from_mint, to_mint) = metadata
-            .swap_data
-            .as_ref()
-            .map(|s| (s.from_mint.to_string(), s.to_mint.to_string()))
+        let (from_mint, to_mint) = extract_route_mints(&event)
+            .map(|(from_mint, to_mint)| (from_mint.to_string(), to_mint.to_string()))
             .unwrap_or_else(|| ("UNKNOWN".to_string(), "UNKNOWN".to_string()));
         if !is_swap_event_type(&metadata.event_type) {
             return;
@@ -283,4 +282,48 @@ fn extract_pool_id(event: &DexEvent) -> Option<String> {
         _ => return None,
     };
     Some(pool.to_string())
+}
+
+#[inline]
+fn extract_route_mints(
+    event: &DexEvent,
+) -> Option<(solana_sdk::pubkey::Pubkey, solana_sdk::pubkey::Pubkey)> {
+    let (from_mint, to_mint) = match event {
+        DexEvent::PumpSwapBuyEvent(e) => (e.quote_mint, e.base_mint),
+        DexEvent::PumpSwapSellEvent(e) => (e.base_mint, e.quote_mint),
+        DexEvent::BonkTradeEvent(e) => match e.trade_direction {
+            TradeDirection::Buy => (e.quote_token_mint, e.base_token_mint),
+            TradeDirection::Sell => (e.base_token_mint, e.quote_token_mint),
+        },
+        DexEvent::RaydiumCpmmSwapEvent(e) => (e.input_token_mint, e.output_token_mint),
+        DexEvent::RaydiumClmmSwapV2Event(e) => (e.input_vault_mint, e.output_vault_mint),
+        DexEvent::MeteoraDlmmSwapEvent(e) => {
+            if e.swap_for_y {
+                (e.token_x_mint?, e.token_y_mint?)
+            } else {
+                (e.token_y_mint?, e.token_x_mint?)
+            }
+        }
+        DexEvent::MeteoraDlmmSwap2Event(e) => {
+            if e.swap_for_y {
+                (e.token_x_mint?, e.token_y_mint?)
+            } else {
+                (e.token_y_mint?, e.token_x_mint?)
+            }
+        }
+        DexEvent::WhirlpoolSwapV2Event(e) => {
+            if e.a_to_b {
+                (e.token_mint_a, e.token_mint_b)
+            } else {
+                (e.token_mint_b, e.token_mint_a)
+            }
+        }
+        _ => return None,
+    };
+    if from_mint == solana_sdk::pubkey::Pubkey::default()
+        || to_mint == solana_sdk::pubkey::Pubkey::default()
+    {
+        return None;
+    }
+    Some((from_mint, to_mint))
 }
