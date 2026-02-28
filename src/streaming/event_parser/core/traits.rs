@@ -9,6 +9,7 @@ use crate::streaming::event_parser::protocols::block::block_meta_event::BlockMet
 use crate::streaming::event_parser::protocols::bonk::events::*;
 use crate::streaming::event_parser::protocols::meteora_damm_v2::events::*;
 use crate::streaming::event_parser::protocols::meteora_dlmm::events::*;
+use crate::streaming::event_parser::protocols::pancakeswap::events::*;
 use crate::streaming::event_parser::protocols::pumpfun::events::*;
 use crate::streaming::event_parser::protocols::pumpswap::events::*;
 use crate::streaming::event_parser::protocols::raydium_amm_v4::events::*;
@@ -21,6 +22,10 @@ use std::fmt::Debug;
 /// Unified Event Enum - Replaces the trait-based approach with a type-safe enum
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum DexEvent {
+    // PancakeSwap events
+    PancakeSwapSwapEvent(PancakeSwapSwapEvent),
+    PancakeSwapSwapV2Event(PancakeSwapSwapV2Event),
+
     // Bonk events
     BonkTradeEvent(BonkTradeEvent),
     BonkPoolCreateEvent(BonkPoolCreateEvent),
@@ -114,6 +119,8 @@ pub enum DexEvent {
 impl DexEvent {
     pub fn metadata(&self) -> &EventMetadata {
         match self {
+            DexEvent::PancakeSwapSwapEvent(e) => &e.metadata,
+            DexEvent::PancakeSwapSwapV2Event(e) => &e.metadata,
             DexEvent::BonkTradeEvent(e) => &e.metadata,
             DexEvent::BonkPoolCreateEvent(e) => &e.metadata,
             DexEvent::BonkMigrateToAmmEvent(e) => &e.metadata,
@@ -184,6 +191,8 @@ impl DexEvent {
 
     pub fn metadata_mut(&mut self) -> &mut EventMetadata {
         match self {
+            DexEvent::PancakeSwapSwapEvent(e) => &mut e.metadata,
+            DexEvent::PancakeSwapSwapV2Event(e) => &mut e.metadata,
             DexEvent::BonkTradeEvent(e) => &mut e.metadata,
             DexEvent::BonkPoolCreateEvent(e) => &mut e.metadata,
             DexEvent::BonkMigrateToAmmEvent(e) => &mut e.metadata,

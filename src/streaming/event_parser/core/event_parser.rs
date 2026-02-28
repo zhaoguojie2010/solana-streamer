@@ -717,6 +717,13 @@ impl EventParser {
             DexEvent::PumpSwapBuyEvent(e) => (e.quote_mint, e.base_mint),
             DexEvent::PumpSwapBuyExactQuoteInEvent(e) => (e.quote_mint, e.base_mint),
             DexEvent::PumpSwapSellEvent(e) => (e.base_mint, e.quote_mint),
+            DexEvent::PancakeSwapSwapV2Event(e) => {
+                if e.a_to_b {
+                    (e.token_mint_a, e.token_mint_b)
+                } else {
+                    (e.token_mint_b, e.token_mint_a)
+                }
+            }
             DexEvent::BonkTradeEvent(e) => match e.trade_direction {
                 crate::streaming::event_parser::protocols::bonk::types::TradeDirection::Buy => {
                     (e.quote_token_mint, e.base_token_mint)
@@ -812,6 +819,14 @@ impl EventParser {
 
     fn instruction_needs_program_data(protocol: &Protocol, data: &[u8]) -> bool {
         match protocol {
+            Protocol::PancakeSwap => {
+                if data.len() < 8 {
+                    return false;
+                }
+                crate::streaming::event_parser::protocols::pancakeswap::parser::is_pancakeswap_swap_instruction(
+                    &data[..8],
+                )
+            }
             Protocol::RaydiumCpmm => {
                 if data.len() < 8 {
                     return false;
@@ -919,6 +934,38 @@ impl EventParser {
                 }
                 DexEvent::PumpSwapSellEvent(trade_info)
             }
+            DexEvent::PancakeSwapSwapEvent(mut trade_info) => {
+                if let Some(swap_data) = trade_info.metadata.swap_data.as_mut() {
+                    if trade_info.amount_0 > 0 || trade_info.amount_1 > 0 {
+                        if trade_info.a_to_b {
+                            swap_data.from_amount = trade_info.amount_0;
+                            swap_data.to_amount = trade_info.amount_1;
+                        } else {
+                            swap_data.from_amount = trade_info.amount_1;
+                            swap_data.to_amount = trade_info.amount_0;
+                        }
+                    } else {
+                        swap_data.from_amount = trade_info.amount;
+                    }
+                }
+                DexEvent::PancakeSwapSwapEvent(trade_info)
+            }
+            DexEvent::PancakeSwapSwapV2Event(mut trade_info) => {
+                if let Some(swap_data) = trade_info.metadata.swap_data.as_mut() {
+                    if trade_info.amount_0 > 0 || trade_info.amount_1 > 0 {
+                        if trade_info.a_to_b {
+                            swap_data.from_amount = trade_info.amount_0;
+                            swap_data.to_amount = trade_info.amount_1;
+                        } else {
+                            swap_data.from_amount = trade_info.amount_1;
+                            swap_data.to_amount = trade_info.amount_0;
+                        }
+                    } else {
+                        swap_data.from_amount = trade_info.amount;
+                    }
+                }
+                DexEvent::PancakeSwapSwapV2Event(trade_info)
+            }
             DexEvent::BonkPoolCreateEvent(pool_info) => {
                 add_bonk_dev_address(&signature, pool_info.creator);
                 DexEvent::BonkPoolCreateEvent(pool_info)
@@ -971,6 +1018,46 @@ fn enrich_event_from_program_data(
     };
 
     match protocol {
+        Protocol::PancakeSwap => {
+            use crate::streaming::event_parser::protocols::pancakeswap::parser::parse_swap_event_from_program_data;
+            match event {
+                DexEvent::PancakeSwapSwapEvent(swap_event) => {
+                    if let Some(log_data) = parse_swap_event_from_program_data(item) {
+                        swap_event.log_account_0 = log_data.log_account_0;
+                        swap_event.log_account_1 = log_data.log_account_1;
+                        swap_event.log_account_2 = log_data.log_account_2;
+                        swap_event.log_account_3 = log_data.log_account_3;
+                        swap_event.amount_0 = log_data.amount_0;
+                        swap_event.transfer_fee_0 = log_data.transfer_fee_0;
+                        swap_event.amount_1 = log_data.amount_1;
+                        swap_event.transfer_fee_1 = log_data.transfer_fee_1;
+                        swap_event.a_to_b = log_data.zero_for_one;
+                        swap_event.zero_for_one = log_data.zero_for_one;
+                        swap_event.sqrt_price_x64 = log_data.sqrt_price_x64;
+                        swap_event.liquidity = log_data.liquidity;
+                        swap_event.tick = log_data.tick;
+                    }
+                }
+                DexEvent::PancakeSwapSwapV2Event(swap_event) => {
+                    if let Some(log_data) = parse_swap_event_from_program_data(item) {
+                        swap_event.log_account_0 = log_data.log_account_0;
+                        swap_event.log_account_1 = log_data.log_account_1;
+                        swap_event.log_account_2 = log_data.log_account_2;
+                        swap_event.log_account_3 = log_data.log_account_3;
+                        swap_event.amount_0 = log_data.amount_0;
+                        swap_event.transfer_fee_0 = log_data.transfer_fee_0;
+                        swap_event.amount_1 = log_data.amount_1;
+                        swap_event.transfer_fee_1 = log_data.transfer_fee_1;
+                        swap_event.a_to_b = log_data.zero_for_one;
+                        swap_event.zero_for_one = log_data.zero_for_one;
+                        swap_event.sqrt_price_x64 = log_data.sqrt_price_x64;
+                        swap_event.liquidity = log_data.liquidity;
+                        swap_event.tick = log_data.tick;
+                    }
+                }
+                _ => {}
+            }
+        }
         Protocol::RaydiumCpmm => {
             use crate::streaming::event_parser::protocols::raydium_cpmm::parser::parse_swap_event_from_program_data;
             if let DexEvent::RaydiumCpmmSwapEvent(swap_event) = event {

@@ -182,6 +182,7 @@ let grpc = YellowstoneGrpc::new_with_config(endpoint, token, config)?;
 | Monitor transaction events using Yellowstone gRPC | `cargo run --example grpc_example` | [examples/grpc_example.rs](examples/grpc_example.rs) |
 | Monitor transaction events using ShredStream | `cargo run --example shred_example` | [examples/shred_example.rs](examples/shred_example.rs) |
 | Parse Solana mainnet transaction data | `cargo run --example parse_tx_events` | [examples/parse_tx_events.rs](examples/parse_tx_events.rs) |
+| Monitor PancakeSwap V3 swap events (Swap/SwapV2) | `cargo run --example pancakeswap_swap_with_logs` | [examples/pancakeswap_swap_with_logs.rs](examples/pancakeswap_swap_with_logs.rs) |
 | Update filters at runtime | `cargo run --example dynamic_subscription` | [examples/dynamic_subscription.rs](examples/dynamic_subscription.rs) |
 | Monitor specific token account balance changes | `cargo run --example token_balance_listen_example` | [examples/token_balance_listen_example.rs](examples/token_balance_listen_example.rs) |
 | Track nonce account state changes | `cargo run --example nonce_listen_example` | [examples/nonce_listen_example.rs](examples/nonce_listen_example.rs) |

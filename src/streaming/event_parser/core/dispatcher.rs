@@ -12,10 +12,10 @@ use crate::streaming::event_parser::{
     core::common_event_parser::{CommonEventParser, COMPUTE_BUDGET_PROGRAM_ID},
     protocols::{
         bonk::parser as bonk, meteora_damm_v2::parser as meteora_damm_v2,
-        meteora_dlmm::parser as meteora_dlmm, pumpfun::parser as pumpfun,
-        pumpswap::parser as pumpswap, raydium_amm_v4::parser as raydium_amm_v4,
-        raydium_clmm::parser as raydium_clmm, raydium_cpmm::parser as raydium_cpmm,
-        whirlpool::parser as whirlpool,
+        meteora_dlmm::parser as meteora_dlmm, pancakeswap::parser as pancakeswap,
+        pumpfun::parser as pumpfun, pumpswap::parser as pumpswap,
+        raydium_amm_v4::parser as raydium_amm_v4, raydium_clmm::parser as raydium_clmm,
+        raydium_cpmm::parser as raydium_cpmm, whirlpool::parser as whirlpool,
     },
     DexEvent, Protocol,
 };
@@ -49,6 +49,7 @@ impl EventDispatcher {
         // 根据协议类型设置 metadata.protocol
         use crate::streaming::event_parser::common::ProtocolType;
         metadata.protocol = match protocol {
+            Protocol::PancakeSwap => ProtocolType::PancakeSwap,
             Protocol::PumpFun => ProtocolType::PumpFun,
             Protocol::PumpSwap => ProtocolType::PumpSwap,
             Protocol::Bonk => ProtocolType::Bonk,
@@ -61,6 +62,12 @@ impl EventDispatcher {
         };
 
         match protocol {
+            Protocol::PancakeSwap => pancakeswap::parse_pancakeswap_instruction_data(
+                instruction_discriminator,
+                instruction_data,
+                accounts,
+                metadata,
+            ),
             Protocol::PumpFun => pumpfun::parse_pumpfun_instruction_data(
                 instruction_discriminator,
                 instruction_data,
@@ -138,6 +145,7 @@ impl EventDispatcher {
         // 根据协议类型设置 metadata.protocol
         use crate::streaming::event_parser::common::ProtocolType;
         metadata.protocol = match protocol {
+            Protocol::PancakeSwap => ProtocolType::PancakeSwap,
             Protocol::PumpFun => ProtocolType::PumpFun,
             Protocol::PumpSwap => ProtocolType::PumpSwap,
             Protocol::Bonk => ProtocolType::Bonk,
@@ -150,6 +158,11 @@ impl EventDispatcher {
         };
 
         match protocol {
+            Protocol::PancakeSwap => pancakeswap::parse_pancakeswap_inner_instruction_data(
+                inner_instruction_discriminator,
+                inner_instruction_data,
+                metadata,
+            ),
             Protocol::PumpFun => pumpfun::parse_pumpfun_inner_instruction_data(
                 inner_instruction_discriminator,
                 inner_instruction_data,
@@ -203,7 +216,9 @@ impl EventDispatcher {
     /// 通过 program_id 匹配协议类型
     #[inline]
     pub fn match_protocol_by_program_id(program_id: &Pubkey) -> Option<Protocol> {
-        if program_id == &pumpfun::PUMPFUN_PROGRAM_ID {
+        if program_id == &pancakeswap::PANCAKESWAP_PROGRAM_ID {
+            Some(Protocol::PancakeSwap)
+        } else if program_id == &pumpfun::PUMPFUN_PROGRAM_ID {
             Some(Protocol::PumpFun)
         } else if program_id == &pumpswap::PUMPSWAP_PROGRAM_ID {
             Some(Protocol::PumpSwap)
@@ -252,6 +267,7 @@ impl EventDispatcher {
     #[inline]
     pub fn get_program_id(protocol: Protocol) -> Pubkey {
         match protocol {
+            Protocol::PancakeSwap => pancakeswap::PANCAKESWAP_PROGRAM_ID,
             Protocol::PumpFun => pumpfun::PUMPFUN_PROGRAM_ID,
             Protocol::PumpSwap => pumpswap::PUMPSWAP_PROGRAM_ID,
             Protocol::Bonk => bonk::BONK_PROGRAM_ID,
@@ -290,6 +306,7 @@ impl EventDispatcher {
         // 根据协议类型设置 metadata.protocol
         use crate::streaming::event_parser::common::ProtocolType;
         metadata.protocol = match protocol {
+            Protocol::PancakeSwap => ProtocolType::PancakeSwap,
             Protocol::PumpFun => ProtocolType::PumpFun,
             Protocol::PumpSwap => ProtocolType::PumpSwap,
             Protocol::Bonk => ProtocolType::Bonk,
@@ -302,6 +319,9 @@ impl EventDispatcher {
         };
 
         match protocol {
+            Protocol::PancakeSwap => {
+                pancakeswap::parse_pancakeswap_account_data(discriminator, account, metadata)
+            }
             Protocol::PumpFun => {
                 pumpfun::parse_pumpfun_account_data(discriminator, account, metadata)
             }

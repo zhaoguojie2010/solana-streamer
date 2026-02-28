@@ -3,8 +3,9 @@ use solana_streamer_sdk::streaming::event_parser::{
     protocols::bonk::types::TradeDirection,
     protocols::{
         bonk::parser::BONK_PROGRAM_ID, meteora_damm_v2::parser::METEORA_DAMM_V2_PROGRAM_ID,
-        meteora_dlmm::parser::METEORA_DLMM_PROGRAM_ID, pumpfun::parser::PUMPFUN_PROGRAM_ID,
-        pumpswap::parser::PUMPSWAP_PROGRAM_ID, raydium_amm_v4::parser::RAYDIUM_AMM_V4_PROGRAM_ID,
+        meteora_dlmm::parser::METEORA_DLMM_PROGRAM_ID, pancakeswap::parser::PANCAKESWAP_PROGRAM_ID,
+        pumpfun::parser::PUMPFUN_PROGRAM_ID, pumpswap::parser::PUMPSWAP_PROGRAM_ID,
+        raydium_amm_v4::parser::RAYDIUM_AMM_V4_PROGRAM_ID,
         raydium_clmm::parser::RAYDIUM_CLMM_PROGRAM_ID,
         raydium_cpmm::parser::RAYDIUM_CPMM_PROGRAM_ID, whirlpool::parser::WHIRLPOOL_PROGRAM_ID,
     },
@@ -56,6 +57,7 @@ async fn subscribe_arb_events() -> Result<(), Box<dyn std::error::Error>> {
     )?;
 
     let protocols = vec![
+        Protocol::PancakeSwap,
         Protocol::PumpFun,
         Protocol::PumpSwap,
         Protocol::Bonk,
@@ -68,6 +70,7 @@ async fn subscribe_arb_events() -> Result<(), Box<dyn std::error::Error>> {
     ];
 
     let account_include = vec![
+        PANCAKESWAP_PROGRAM_ID.to_string(),
         PUMPFUN_PROGRAM_ID.to_string(),
         PUMPSWAP_PROGRAM_ID.to_string(),
         BONK_PROGRAM_ID.to_string(),
@@ -239,7 +242,9 @@ fn create_arb_callback() -> impl Fn(DexEvent) + Send + Sync + 'static {
 fn is_swap_event_type(event_type: &EventType) -> bool {
     matches!(
         event_type,
-        EventType::PumpSwapBuy
+        EventType::PancakeSwapSwap
+            | EventType::PancakeSwapSwapV2
+            | EventType::PumpSwapBuy
             | EventType::PumpSwapSell
             | EventType::PumpFunBuy
             | EventType::PumpFunSell
@@ -267,6 +272,8 @@ fn extract_pool_id(event: &DexEvent) -> Option<String> {
     let pool = match event {
         DexEvent::PumpSwapBuyEvent(e) => e.pool,
         DexEvent::PumpSwapSellEvent(e) => e.pool,
+        DexEvent::PancakeSwapSwapEvent(e) => e.pool,
+        DexEvent::PancakeSwapSwapV2Event(e) => e.pool,
         DexEvent::PumpFunTradeEvent(e) => e.bonding_curve,
         DexEvent::BonkTradeEvent(e) => e.pool_state,
         DexEvent::RaydiumCpmmSwapEvent(e) => e.pool_state,
@@ -291,6 +298,13 @@ fn extract_route_mints(
     let (from_mint, to_mint) = match event {
         DexEvent::PumpSwapBuyEvent(e) => (e.quote_mint, e.base_mint),
         DexEvent::PumpSwapSellEvent(e) => (e.base_mint, e.quote_mint),
+        DexEvent::PancakeSwapSwapV2Event(e) => {
+            if e.a_to_b {
+                (e.token_mint_a, e.token_mint_b)
+            } else {
+                (e.token_mint_b, e.token_mint_a)
+            }
+        }
         DexEvent::BonkTradeEvent(e) => match e.trade_direction {
             TradeDirection::Buy => (e.quote_token_mint, e.base_token_mint),
             TradeDirection::Sell => (e.base_token_mint, e.quote_token_mint),

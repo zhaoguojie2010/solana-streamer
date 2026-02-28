@@ -44,6 +44,7 @@ lazy_static::lazy_static! {
     Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize,
 )]
 pub enum ProtocolType {
+    PancakeSwap,
     #[default]
     PumpSwap,
     PumpFun,
@@ -71,6 +72,10 @@ pub enum ProtocolType {
     BorshDeserialize,
 )]
 pub enum EventType {
+    // PancakeSwap events
+    PancakeSwapSwap,
+    PancakeSwapSwapV2,
+
     // PumpSwap events
     #[default]
     PumpSwapBuy,
@@ -199,6 +204,8 @@ pub const BLOCK_EVENT_TYPES: &[EventType] = &[EventType::BlockMeta];
 impl fmt::Display for EventType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            EventType::PancakeSwapSwap => write!(f, "PancakeSwapSwap"),
+            EventType::PancakeSwapSwapV2 => write!(f, "PancakeSwapSwapV2"),
             EventType::PumpSwapBuy => write!(f, "PumpSwapBuy"),
             EventType::PumpSwapBuyExactQuoteIn => write!(f, "PumpSwapBuyExactQuoteIn"),
             EventType::PumpSwapSell => write!(f, "PumpSwapSell"),
@@ -469,6 +476,38 @@ pub fn parse_swap_data_from_next_instructions(
             swap_data.from_mint = e.base_mint;
             swap_data.to_mint = e.quote_mint;
         }
+        DexEvent::PancakeSwapSwapEvent(e) => {
+            swap_data.description =
+                Some("Unable to get from_mint and to_mint from PancakeSwapSwapEvent".into());
+            if e.a_to_b {
+                user_from_token = Some(e.token_owner_account_a);
+                user_to_token = Some(e.token_owner_account_b);
+                from_vault = Some(e.token_vault_a);
+                to_vault = Some(e.token_vault_b);
+            } else {
+                user_from_token = Some(e.token_owner_account_b);
+                user_to_token = Some(e.token_owner_account_a);
+                from_vault = Some(e.token_vault_b);
+                to_vault = Some(e.token_vault_a);
+            }
+        }
+        DexEvent::PancakeSwapSwapV2Event(e) => {
+            if e.a_to_b {
+                from_mint = Some(e.token_mint_a);
+                to_mint = Some(e.token_mint_b);
+                user_from_token = Some(e.token_owner_account_a);
+                user_to_token = Some(e.token_owner_account_b);
+                from_vault = Some(e.token_vault_a);
+                to_vault = Some(e.token_vault_b);
+            } else {
+                from_mint = Some(e.token_mint_b);
+                to_mint = Some(e.token_mint_a);
+                user_from_token = Some(e.token_owner_account_b);
+                user_to_token = Some(e.token_owner_account_a);
+                from_vault = Some(e.token_vault_b);
+                to_vault = Some(e.token_vault_a);
+            }
+        }
         DexEvent::RaydiumCpmmSwapEvent(e) => {
             // user = Some(e.payer);
             from_mint = Some(e.input_token_mint);
@@ -704,6 +743,38 @@ pub fn parse_swap_data_from_next_grpc_instructions(
         DexEvent::PumpSwapSellEvent(e) => {
             swap_data.from_mint = e.base_mint;
             swap_data.to_mint = e.quote_mint;
+        }
+        DexEvent::PancakeSwapSwapEvent(e) => {
+            swap_data.description =
+                Some("Unable to get from_mint and to_mint from PancakeSwapSwapEvent".into());
+            if e.a_to_b {
+                user_from_token = Some(e.token_owner_account_a);
+                user_to_token = Some(e.token_owner_account_b);
+                from_vault = Some(e.token_vault_a);
+                to_vault = Some(e.token_vault_b);
+            } else {
+                user_from_token = Some(e.token_owner_account_b);
+                user_to_token = Some(e.token_owner_account_a);
+                from_vault = Some(e.token_vault_b);
+                to_vault = Some(e.token_vault_a);
+            }
+        }
+        DexEvent::PancakeSwapSwapV2Event(e) => {
+            if e.a_to_b {
+                from_mint = Some(e.token_mint_a);
+                to_mint = Some(e.token_mint_b);
+                user_from_token = Some(e.token_owner_account_a);
+                user_to_token = Some(e.token_owner_account_b);
+                from_vault = Some(e.token_vault_a);
+                to_vault = Some(e.token_vault_b);
+            } else {
+                from_mint = Some(e.token_mint_b);
+                to_mint = Some(e.token_mint_a);
+                user_from_token = Some(e.token_owner_account_b);
+                user_to_token = Some(e.token_owner_account_a);
+                from_vault = Some(e.token_vault_b);
+                to_vault = Some(e.token_vault_a);
+            }
         }
         DexEvent::RaydiumCpmmSwapEvent(e) => {
             // user = Some(e.payer);

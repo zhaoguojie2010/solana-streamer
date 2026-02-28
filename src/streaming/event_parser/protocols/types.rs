@@ -1,7 +1,8 @@
 use crate::streaming::event_parser::protocols::{
     bonk::parser::BONK_PROGRAM_ID, meteora_damm_v2::parser::METEORA_DAMM_V2_PROGRAM_ID,
-    meteora_dlmm::parser::METEORA_DLMM_PROGRAM_ID, pumpfun::parser::PUMPFUN_PROGRAM_ID,
-    pumpswap::parser::PUMPSWAP_PROGRAM_ID, raydium_amm_v4::parser::RAYDIUM_AMM_V4_PROGRAM_ID,
+    meteora_dlmm::parser::METEORA_DLMM_PROGRAM_ID, pancakeswap::parser::PANCAKESWAP_PROGRAM_ID,
+    pumpfun::parser::PUMPFUN_PROGRAM_ID, pumpswap::parser::PUMPSWAP_PROGRAM_ID,
+    raydium_amm_v4::parser::RAYDIUM_AMM_V4_PROGRAM_ID,
     raydium_clmm::parser::RAYDIUM_CLMM_PROGRAM_ID, raydium_cpmm::parser::RAYDIUM_CPMM_PROGRAM_ID,
     whirlpool::parser::WHIRLPOOL_PROGRAM_ID,
 };
@@ -11,6 +12,7 @@ use solana_sdk::pubkey::Pubkey;
 /// 支持的协议
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Protocol {
+    PancakeSwap,
     PumpSwap,
     PumpFun,
     Bonk,
@@ -25,6 +27,7 @@ pub enum Protocol {
 impl Protocol {
     pub fn get_program_id(&self) -> Vec<Pubkey> {
         match self {
+            Protocol::PancakeSwap => vec![PANCAKESWAP_PROGRAM_ID],
             Protocol::PumpSwap => vec![PUMPSWAP_PROGRAM_ID],
             Protocol::PumpFun => vec![PUMPFUN_PROGRAM_ID],
             Protocol::Bonk => vec![BONK_PROGRAM_ID],
@@ -41,6 +44,7 @@ impl Protocol {
 impl std::fmt::Display for Protocol {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Protocol::PancakeSwap => write!(f, "PancakeSwap"),
             Protocol::PumpSwap => write!(f, "PumpSwap"),
             Protocol::PumpFun => write!(f, "PumpFun"),
             Protocol::Bonk => write!(f, "Bonk"),
@@ -59,6 +63,7 @@ impl std::str::FromStr for Protocol {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
+            "pancakeswap" => Ok(Protocol::PancakeSwap),
             "pumpswap" => Ok(Protocol::PumpSwap),
             "pumpfun" => Ok(Protocol::PumpFun),
             "bonk" => Ok(Protocol::Bonk),
