@@ -715,6 +715,7 @@ impl EventParser {
     fn extract_swap_mints(event: &DexEvent) -> Option<(Pubkey, Pubkey)> {
         let (from_mint, to_mint) = match event {
             DexEvent::PumpSwapBuyEvent(e) => (e.quote_mint, e.base_mint),
+            DexEvent::PumpSwapBuyExactQuoteInEvent(e) => (e.quote_mint, e.base_mint),
             DexEvent::PumpSwapSellEvent(e) => (e.base_mint, e.quote_mint),
             DexEvent::BonkTradeEvent(e) => match e.trade_direction {
                 crate::streaming::event_parser::protocols::bonk::types::TradeDirection::Buy => {
@@ -895,6 +896,21 @@ impl EventParser {
                     swap_data.to_amount = trade_info.base_amount_out;
                 }
                 DexEvent::PumpSwapBuyEvent(trade_info)
+            }
+            DexEvent::PumpSwapBuyExactQuoteInEvent(mut trade_info) => {
+                if let Some(swap_data) = trade_info.metadata.swap_data.as_mut() {
+                    swap_data.from_amount = if trade_info.user_quote_amount_in > 0 {
+                        trade_info.user_quote_amount_in
+                    } else {
+                        trade_info.quote_amount_in
+                    };
+                    swap_data.to_amount = if trade_info.actual_base_amount_out > 0 {
+                        trade_info.actual_base_amount_out
+                    } else {
+                        trade_info.min_base_amount_out
+                    };
+                }
+                DexEvent::PumpSwapBuyExactQuoteInEvent(trade_info)
             }
             DexEvent::PumpSwapSellEvent(mut trade_info) => {
                 if let Some(swap_data) = trade_info.metadata.swap_data.as_mut() {

@@ -74,6 +74,7 @@ pub enum EventType {
     // PumpSwap events
     #[default]
     PumpSwapBuy,
+    PumpSwapBuyExactQuoteIn,
     PumpSwapSell,
     PumpSwapCreatePool,
     PumpSwapDeposit,
@@ -199,6 +200,7 @@ impl fmt::Display for EventType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             EventType::PumpSwapBuy => write!(f, "PumpSwapBuy"),
+            EventType::PumpSwapBuyExactQuoteIn => write!(f, "PumpSwapBuyExactQuoteIn"),
             EventType::PumpSwapSell => write!(f, "PumpSwapSell"),
             EventType::PumpSwapCreatePool => write!(f, "PumpSwapCreatePool"),
             EventType::PumpSwapDeposit => write!(f, "PumpSwapDeposit"),
@@ -459,6 +461,10 @@ pub fn parse_swap_data_from_next_instructions(
             swap_data.from_mint = e.quote_mint;
             swap_data.to_mint = e.base_mint;
         }
+        DexEvent::PumpSwapBuyExactQuoteInEvent(e) => {
+            swap_data.from_mint = e.quote_mint;
+            swap_data.to_mint = e.base_mint;
+        }
         DexEvent::PumpSwapSellEvent(e) => {
             swap_data.from_mint = e.base_mint;
             swap_data.to_mint = e.quote_mint;
@@ -688,6 +694,10 @@ pub fn parse_swap_data_from_next_grpc_instructions(
             swap_data.to_mint = if e.is_buy { e.mint } else { *SOL_MINT };
         }
         DexEvent::PumpSwapBuyEvent(e) => {
+            swap_data.from_mint = e.quote_mint;
+            swap_data.to_mint = e.base_mint;
+        }
+        DexEvent::PumpSwapBuyExactQuoteInEvent(e) => {
             swap_data.from_mint = e.quote_mint;
             swap_data.to_mint = e.base_mint;
         }

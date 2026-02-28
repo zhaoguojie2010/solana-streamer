@@ -40,6 +40,7 @@ pub enum DexEvent {
 
     // PumpSwap events
     PumpSwapBuyEvent(PumpSwapBuyEvent),
+    PumpSwapBuyExactQuoteInEvent(PumpSwapBuyExactQuoteInEvent),
     PumpSwapSellEvent(PumpSwapSellEvent),
     PumpSwapCreatePoolEvent(PumpSwapCreatePoolEvent),
     PumpSwapDepositEvent(PumpSwapDepositEvent),
@@ -127,6 +128,7 @@ impl DexEvent {
             DexEvent::PumpFunBondingCurveAccountEvent(e) => &e.metadata,
             DexEvent::PumpFunGlobalAccountEvent(e) => &e.metadata,
             DexEvent::PumpSwapBuyEvent(e) => &e.metadata,
+            DexEvent::PumpSwapBuyExactQuoteInEvent(e) => &e.metadata,
             DexEvent::PumpSwapSellEvent(e) => &e.metadata,
             DexEvent::PumpSwapCreatePoolEvent(e) => &e.metadata,
             DexEvent::PumpSwapDepositEvent(e) => &e.metadata,
@@ -196,6 +198,7 @@ impl DexEvent {
             DexEvent::PumpFunBondingCurveAccountEvent(e) => &mut e.metadata,
             DexEvent::PumpFunGlobalAccountEvent(e) => &mut e.metadata,
             DexEvent::PumpSwapBuyEvent(e) => &mut e.metadata,
+            DexEvent::PumpSwapBuyExactQuoteInEvent(e) => &mut e.metadata,
             DexEvent::PumpSwapSellEvent(e) => &mut e.metadata,
             DexEvent::PumpSwapCreatePoolEvent(e) => &mut e.metadata,
             DexEvent::PumpSwapDepositEvent(e) => &mut e.metadata,

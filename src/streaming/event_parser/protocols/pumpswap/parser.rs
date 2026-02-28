@@ -3,8 +3,8 @@ use crate::streaming::event_parser::{
     protocols::pumpswap::{
         discriminators, pump_swap_buy_event_log_decode, pump_swap_create_pool_event_log_decode,
         pump_swap_deposit_event_log_decode, pump_swap_sell_event_log_decode,
-        pump_swap_withdraw_event_log_decode, PumpSwapBuyEvent, PumpSwapCreatePoolEvent,
-        PumpSwapDepositEvent, PumpSwapSellEvent, PumpSwapWithdrawEvent,
+        pump_swap_withdraw_event_log_decode, PumpSwapBuyEvent, PumpSwapBuyExactQuoteInEvent,
+        PumpSwapCreatePoolEvent, PumpSwapDepositEvent, PumpSwapSellEvent, PumpSwapWithdrawEvent,
     },
     DexEvent,
 };
@@ -167,15 +167,12 @@ fn parse_buy_instruction(
 /// 解析买入指令事件（BuyExactQuoteIn）
 ///
 /// 参数布局: quote_amount_in(u64), min_base_amount_out(u64)
-/// 为了与现有 PumpSwapBuyEvent 结构兼容，映射为：
-/// - max_quote_amount_in = quote_amount_in
-/// - base_amount_out = min_base_amount_out
 fn parse_buy_exact_quote_in_instruction(
     data: &[u8],
     accounts: &[Pubkey],
     mut metadata: EventMetadata,
 ) -> Option<DexEvent> {
-    metadata.event_type = EventType::PumpSwapBuy;
+    metadata.event_type = EventType::PumpSwapBuyExactQuoteIn;
 
     if data.len() < 16 || accounts.len() < 13 {
         return None;
@@ -184,26 +181,29 @@ fn parse_buy_exact_quote_in_instruction(
     let quote_amount_in = read_u64_le(data, 0)?;
     let min_base_amount_out = read_u64_le(data, 8)?;
 
-    Some(DexEvent::PumpSwapBuyEvent(PumpSwapBuyEvent {
-        metadata,
-        base_amount_out: min_base_amount_out,
-        max_quote_amount_in: quote_amount_in,
-        pool: accounts[0],
-        user: accounts[1],
-        base_mint: accounts[3],
-        quote_mint: accounts[4],
-        user_base_token_account: accounts[5],
-        user_quote_token_account: accounts[6],
-        pool_base_token_account: accounts[7],
-        pool_quote_token_account: accounts[8],
-        protocol_fee_recipient: accounts[9],
-        protocol_fee_recipient_token_account: accounts[10],
-        base_token_program: accounts[11],
-        quote_token_program: accounts[12],
-        coin_creator_vault_ata: accounts.get(17).copied().unwrap_or_default(),
-        coin_creator_vault_authority: accounts.get(18).copied().unwrap_or_default(),
-        ..Default::default()
-    }))
+    Some(DexEvent::PumpSwapBuyExactQuoteInEvent(
+        PumpSwapBuyExactQuoteInEvent {
+            metadata,
+            quote_amount_in,
+            min_base_amount_out,
+            user_quote_amount_in: quote_amount_in,
+            pool: accounts[0],
+            user: accounts[1],
+            base_mint: accounts[3],
+            quote_mint: accounts[4],
+            user_base_token_account: accounts[5],
+            user_quote_token_account: accounts[6],
+            pool_base_token_account: accounts[7],
+            pool_quote_token_account: accounts[8],
+            protocol_fee_recipient: accounts[9],
+            protocol_fee_recipient_token_account: accounts[10],
+            base_token_program: accounts[11],
+            quote_token_program: accounts[12],
+            coin_creator_vault_ata: accounts.get(17).copied().unwrap_or_default(),
+            coin_creator_vault_authority: accounts.get(18).copied().unwrap_or_default(),
+            ..Default::default()
+        },
+    ))
 }
 
 /// 解析卖出指令事件

@@ -65,6 +65,54 @@ pub fn pump_swap_buy_event_log_decode(data: &[u8]) -> Option<PumpSwapBuyEvent> {
     borsh::from_slice::<PumpSwapBuyEvent>(&data[..PUMP_SWAP_BUY_EVENT_LOG_SIZE]).ok()
 }
 
+/// 精确报价买入事件（BuyExactQuoteIn）
+///
+/// 该事件来自 BUY_EXACT_QUOTE_IN 指令参数，字段语义与 Buy 指令不同：
+/// - quote_amount_in: 精确输入的 quote 数量（指令参数）
+/// - min_base_amount_out: 最小可接受的 base 输出（指令参数）
+/// - actual_base_amount_out: 真实成交 base 输出（由 inner BUY_EVENT 回填）
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PumpSwapBuyExactQuoteInEvent {
+    pub metadata: EventMetadata,
+    pub timestamp: i64,
+    pub quote_amount_in: u64,
+    pub min_base_amount_out: u64,
+    pub actual_base_amount_out: u64,
+    pub user_base_token_reserves: u64,
+    pub user_quote_token_reserves: u64,
+    pub pool_base_token_reserves: u64,
+    pub pool_quote_token_reserves: u64,
+    pub actual_quote_amount_in: u64,
+    pub lp_fee_basis_points: u64,
+    pub lp_fee: u64,
+    pub protocol_fee_basis_points: u64,
+    pub protocol_fee: u64,
+    pub quote_amount_in_with_lp_fee: u64,
+    pub user_quote_amount_in: u64,
+    pub pool: Pubkey,
+    pub user: Pubkey,
+    pub user_base_token_account: Pubkey,
+    pub user_quote_token_account: Pubkey,
+    pub protocol_fee_recipient: Pubkey,
+    pub protocol_fee_recipient_token_account: Pubkey,
+    pub coin_creator: Pubkey,
+    pub coin_creator_fee_basis_points: u64,
+    pub coin_creator_fee: u64,
+    pub track_volume: bool,
+    pub total_unclaimed_tokens: u64,
+    pub total_claimed_tokens: u64,
+    pub current_sol_volume: u64,
+    pub last_update_timestamp: i64,
+    pub base_mint: Pubkey,
+    pub quote_mint: Pubkey,
+    pub pool_base_token_account: Pubkey,
+    pub pool_quote_token_account: Pubkey,
+    pub coin_creator_vault_ata: Pubkey,
+    pub coin_creator_vault_authority: Pubkey,
+    pub base_token_program: Pubkey,
+    pub quote_token_program: Pubkey,
+}
+
 /// 卖出事件
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, BorshDeserialize)]
 pub struct PumpSwapSellEvent {
