@@ -717,13 +717,7 @@ impl EventParser {
             DexEvent::PumpSwapBuyEvent(e) => (e.quote_mint, e.base_mint),
             DexEvent::PumpSwapBuyExactQuoteInEvent(e) => (e.quote_mint, e.base_mint),
             DexEvent::PumpSwapSellEvent(e) => (e.base_mint, e.quote_mint),
-            DexEvent::PancakeSwapSwapV2Event(e) => {
-                if e.a_to_b {
-                    (e.token_mint_a, e.token_mint_b)
-                } else {
-                    (e.token_mint_b, e.token_mint_a)
-                }
-            }
+            DexEvent::PancakeSwapSwapV2Event(e) => (e.input_mint, e.output_mint),
             DexEvent::BonkTradeEvent(e) => match e.trade_direction {
                 crate::streaming::event_parser::protocols::bonk::types::TradeDirection::Buy => {
                     (e.quote_token_mint, e.base_token_mint)
@@ -937,7 +931,7 @@ impl EventParser {
             DexEvent::PancakeSwapSwapEvent(mut trade_info) => {
                 if let Some(swap_data) = trade_info.metadata.swap_data.as_mut() {
                     if trade_info.amount_0 > 0 || trade_info.amount_1 > 0 {
-                        if trade_info.a_to_b {
+                        if trade_info.zero_for_one {
                             swap_data.from_amount = trade_info.amount_0;
                             swap_data.to_amount = trade_info.amount_1;
                         } else {
@@ -953,7 +947,7 @@ impl EventParser {
             DexEvent::PancakeSwapSwapV2Event(mut trade_info) => {
                 if let Some(swap_data) = trade_info.metadata.swap_data.as_mut() {
                     if trade_info.amount_0 > 0 || trade_info.amount_1 > 0 {
-                        if trade_info.a_to_b {
+                        if trade_info.zero_for_one {
                             swap_data.from_amount = trade_info.amount_0;
                             swap_data.to_amount = trade_info.amount_1;
                         } else {
@@ -1023,15 +1017,10 @@ fn enrich_event_from_program_data(
             match event {
                 DexEvent::PancakeSwapSwapEvent(swap_event) => {
                     if let Some(log_data) = parse_swap_event_from_program_data(item) {
-                        swap_event.log_account_0 = log_data.log_account_0;
-                        swap_event.log_account_1 = log_data.log_account_1;
-                        swap_event.log_account_2 = log_data.log_account_2;
-                        swap_event.log_account_3 = log_data.log_account_3;
                         swap_event.amount_0 = log_data.amount_0;
                         swap_event.transfer_fee_0 = log_data.transfer_fee_0;
                         swap_event.amount_1 = log_data.amount_1;
                         swap_event.transfer_fee_1 = log_data.transfer_fee_1;
-                        swap_event.a_to_b = log_data.zero_for_one;
                         swap_event.zero_for_one = log_data.zero_for_one;
                         swap_event.sqrt_price_x64 = log_data.sqrt_price_x64;
                         swap_event.liquidity = log_data.liquidity;
@@ -1040,15 +1029,10 @@ fn enrich_event_from_program_data(
                 }
                 DexEvent::PancakeSwapSwapV2Event(swap_event) => {
                     if let Some(log_data) = parse_swap_event_from_program_data(item) {
-                        swap_event.log_account_0 = log_data.log_account_0;
-                        swap_event.log_account_1 = log_data.log_account_1;
-                        swap_event.log_account_2 = log_data.log_account_2;
-                        swap_event.log_account_3 = log_data.log_account_3;
                         swap_event.amount_0 = log_data.amount_0;
                         swap_event.transfer_fee_0 = log_data.transfer_fee_0;
                         swap_event.amount_1 = log_data.amount_1;
                         swap_event.transfer_fee_1 = log_data.transfer_fee_1;
-                        swap_event.a_to_b = log_data.zero_for_one;
                         swap_event.zero_for_one = log_data.zero_for_one;
                         swap_event.sqrt_price_x64 = log_data.sqrt_price_x64;
                         swap_event.liquidity = log_data.liquidity;

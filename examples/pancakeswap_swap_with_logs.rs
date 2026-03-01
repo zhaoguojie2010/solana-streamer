@@ -61,6 +61,7 @@ async fn subscribe_pancakeswap_swaps() -> Result<(), Box<dyn std::error::Error>>
 
 fn create_event_callback() -> impl Fn(DexEvent) {
     |event: DexEvent| match event {
+        /*
         DexEvent::PancakeSwapSwapEvent(e) => {
             println!("=== PancakeSwap Swap 事件 ===");
             println!("事件类型: {:?}", e.metadata.event_type);
@@ -70,16 +71,11 @@ fn create_event_callback() -> impl Fn(DexEvent) {
             println!("amount: {}", e.amount);
             println!("other_amount_threshold: {}", e.other_amount_threshold);
             println!("sqrt_price_limit: {}", e.sqrt_price_limit);
-            println!("amount_specified_is_input: {:?}", e.amount_specified_is_input);
-            println!("a_to_b: {}", e.a_to_b);
-            println!("token_owner_account_a: {}", e.token_owner_account_a);
-            println!("token_owner_account_b: {}", e.token_owner_account_b);
-            println!("token_vault_a: {}", e.token_vault_a);
-            println!("token_vault_b: {}", e.token_vault_b);
-            println!("log_account_0: {}", e.log_account_0);
-            println!("log_account_1: {}", e.log_account_1);
-            println!("log_account_2: {}", e.log_account_2);
-            println!("log_account_3: {}", e.log_account_3);
+            println!("is_base_input: {:?}", e.is_base_input);
+            println!("input_token_account: {}", e.input_token_account);
+            println!("output_token_account: {}", e.output_token_account);
+            println!("input_vault: {}", e.input_vault);
+            println!("output_vault: {}", e.output_vault);
             println!("amount_0(log): {}", e.amount_0);
             println!("amount_1(log): {}", e.amount_1);
             println!("transfer_fee_0(log): {}", e.transfer_fee_0);
@@ -90,7 +86,7 @@ fn create_event_callback() -> impl Fn(DexEvent) {
             println!("tick(log): {}", e.tick);
             println!("remaining_accounts: {}", e.remaining_accounts.len());
             println!("=====================================\n");
-        }
+        }*/
         DexEvent::PancakeSwapSwapV2Event(e) => {
             println!("=== PancakeSwap SwapV2 事件 ===");
             println!("事件类型: {:?}", e.metadata.event_type);
@@ -100,16 +96,13 @@ fn create_event_callback() -> impl Fn(DexEvent) {
             println!("amount: {}", e.amount);
             println!("other_amount_threshold: {}", e.other_amount_threshold);
             println!("sqrt_price_limit: {}", e.sqrt_price_limit);
-            println!("amount_specified_is_input: {:?}", e.amount_specified_is_input);
-            println!("a_to_b: {}", e.a_to_b);
-            println!("token_mint_a: {}", e.token_mint_a);
-            println!("token_mint_b: {}", e.token_mint_b);
-            println!("token_vault_a: {}", e.token_vault_a);
-            println!("token_vault_b: {}", e.token_vault_b);
-            println!("log_account_0: {}", e.log_account_0);
-            println!("log_account_1: {}", e.log_account_1);
-            println!("log_account_2: {}", e.log_account_2);
-            println!("log_account_3: {}", e.log_account_3);
+            println!("is_base_input: {:?}", e.is_base_input);
+            println!("input_token_account: {}", e.input_token_account);
+            println!("output_token_account: {}", e.output_token_account);
+            println!("input_vault: {}", e.input_vault);
+            println!("output_vault: {}", e.output_vault);
+            println!("input_mint: {}", e.input_mint);
+            println!("output_mint: {}", e.output_mint);
             println!("amount_0(log): {}", e.amount_0);
             println!("amount_1(log): {}", e.amount_1);
             println!("transfer_fee_0(log): {}", e.transfer_fee_0);

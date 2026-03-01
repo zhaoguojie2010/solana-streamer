@@ -59,28 +59,36 @@ fn parse_swap_instruction(
 ) -> Option<DexEvent> {
     metadata.event_type = EventType::PancakeSwapSwap;
 
-    // 链上观测：目前已出现 33 字节布局（无 amount_specified_is_input 字段）
+    // 链上观测：目前已出现 33 字节布局（无 is_base_input 字段）
     // amount(u64) + other_amount_threshold(u64) + sqrt_price_limit(u128) + a_to_b(bool)
-    // 兼容 34 字节布局（含 amount_specified_is_input + a_to_b）
+    // 兼容 34 字节布局（含 is_base_input + a_to_b）
     if data.len() < 33 || accounts.len() < 12 {
         return None;
     }
 
-    let (amount_specified_is_input, a_to_b) = parse_amount_flags(data)?;
+    let (is_base_input, _) = parse_amount_flags(data)?;
+    // 33 字节布局缺少 is_base_input 字段时，按链上行为回退为 true（exact-in）
+    let is_base_input = is_base_input.or(Some(true));
+    // Swap 实际账户顺序（链上实测）:
+    // [2]=token_authority_or_signer, [3]=input_token_account, [4]=output_token_account,
+    // [5]=input_vault, [6]=output_vault
+    let input_token_account = accounts[3];
+    let output_token_account = accounts[4];
+    let input_vault = accounts[5];
+    let output_vault = accounts[6];
 
     Some(DexEvent::PancakeSwapSwapEvent(PancakeSwapSwapEvent {
         metadata,
         amount: read_u64_le(data, 0)?,
         other_amount_threshold: read_u64_le(data, 8)?,
         sqrt_price_limit: read_u128_le(data, 16)?,
-        amount_specified_is_input,
-        a_to_b,
+        is_base_input,
         token_authority: accounts[0],
         pool: accounts[1],
-        token_owner_account_a: accounts[2],
-        token_owner_account_b: accounts[3],
-        token_vault_a: accounts[4],
-        token_vault_b: accounts[5],
+        input_token_account,
+        output_token_account,
+        input_vault,
+        output_vault,
         account_6: accounts[6],
         account_7: accounts[7],
         token_program: accounts[8],
@@ -104,28 +112,36 @@ fn parse_swap_v2_instruction(
         return None;
     }
 
-    let (amount_specified_is_input, a_to_b) = parse_amount_flags(data)?;
+    let (is_base_input, _) = parse_amount_flags(data)?;
+    // SwapV2 实际账户顺序（链上实测）:
+    // [2]=payer_or_owner, [3]=input_token_account, [4]=output_token_account,
+    // [5]=input_vault, [6]=output_vault, [11]=input_mint, [12]=output_mint
+    let input_token_account = accounts[3];
+    let output_token_account = accounts[4];
+    let input_vault = accounts[5];
+    let output_vault = accounts[6];
+    let input_mint = accounts[11];
+    let output_mint = accounts[12];
 
     Some(DexEvent::PancakeSwapSwapV2Event(PancakeSwapSwapV2Event {
         metadata,
         amount: read_u64_le(data, 0)?,
         other_amount_threshold: read_u64_le(data, 8)?,
         sqrt_price_limit: read_u128_le(data, 16)?,
-        amount_specified_is_input,
-        a_to_b,
+        is_base_input,
         token_authority: accounts[0],
         pool: accounts[1],
-        token_owner_account_a: accounts[2],
-        token_owner_account_b: accounts[3],
-        token_vault_a: accounts[4],
-        token_vault_b: accounts[5],
+        input_token_account,
+        output_token_account,
+        input_vault,
+        output_vault,
+        input_mint,
+        output_mint,
         account_6: accounts[6],
         account_7: accounts[7],
         token_program_a: accounts[8],
         token_program_b: accounts[9],
         memo_program: accounts[10],
-        token_mint_a: accounts[11],
-        token_mint_b: accounts[12],
         account_13: accounts[13],
         account_14: accounts[14],
         account_15: accounts[15],
@@ -140,11 +156,11 @@ fn parse_swap_v2_instruction(
 
 #[inline]
 fn parse_amount_flags(data: &[u8]) -> Option<(Option<bool>, bool)> {
-    let amount_specified_is_input =
+    let is_base_input =
         if data.len() >= 34 { Some(read_u8_le(data, 32)? != 0) } else { None };
     let a_to_b =
         if data.len() >= 34 { read_u8_le(data, 33)? != 0 } else { read_u8_le(data, 32)? != 0 };
-    Some((amount_specified_is_input, a_to_b))
+    Some((is_base_input, a_to_b))
 }
 
 /// PancakeSwap Program data 中 SwapEvent 解码结果
