@@ -245,6 +245,7 @@ fn is_swap_event_type(event_type: &EventType) -> bool {
         EventType::PancakeSwapSwap
             | EventType::PancakeSwapSwapV2
             | EventType::PumpSwapBuy
+            | EventType::PumpSwapBuyExactQuoteIn
             | EventType::PumpSwapSell
             | EventType::PumpFunBuy
             | EventType::PumpFunSell
@@ -271,6 +272,7 @@ fn is_swap_event_type(event_type: &EventType) -> bool {
 fn extract_pool_id(event: &DexEvent) -> Option<String> {
     let pool = match event {
         DexEvent::PumpSwapBuyEvent(e) => e.pool,
+        DexEvent::PumpSwapBuyExactQuoteInEvent(e) => e.pool,
         DexEvent::PumpSwapSellEvent(e) => e.pool,
         DexEvent::PancakeSwapSwapEvent(e) => e.pool,
         DexEvent::PancakeSwapSwapV2Event(e) => e.pool,
@@ -297,14 +299,9 @@ fn extract_route_mints(
 ) -> Option<(solana_sdk::pubkey::Pubkey, solana_sdk::pubkey::Pubkey)> {
     let (from_mint, to_mint) = match event {
         DexEvent::PumpSwapBuyEvent(e) => (e.quote_mint, e.base_mint),
+        DexEvent::PumpSwapBuyExactQuoteInEvent(e) => (e.quote_mint, e.base_mint),
         DexEvent::PumpSwapSellEvent(e) => (e.base_mint, e.quote_mint),
-        DexEvent::PancakeSwapSwapV2Event(e) => {
-            if e.a_to_b {
-                (e.token_mint_a, e.token_mint_b)
-            } else {
-                (e.token_mint_b, e.token_mint_a)
-            }
-        }
+        DexEvent::PancakeSwapSwapV2Event(e) => (e.input_mint, e.output_mint),
         DexEvent::BonkTradeEvent(e) => match e.trade_direction {
             TradeDirection::Buy => (e.quote_token_mint, e.base_token_mint),
             TradeDirection::Sell => (e.base_token_mint, e.quote_token_mint),
