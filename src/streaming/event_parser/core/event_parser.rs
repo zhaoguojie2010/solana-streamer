@@ -1016,7 +1016,11 @@ fn enrich_event_from_program_data(
             use crate::streaming::event_parser::protocols::pancakeswap::parser::parse_swap_event_from_program_data;
             match event {
                 DexEvent::PancakeSwapSwapEvent(swap_event) => {
-                    if let Some(log_data) = parse_swap_event_from_program_data(item) {
+                    if let Some(log_data) = parse_swap_event_from_program_data(item, &swap_event.pool_state) {
+                        swap_event.log_pool_state = log_data.pool_state;
+                        swap_event.log_sender = log_data.sender;
+                        swap_event.log_input_token_account = log_data.input_token_account;
+                        swap_event.log_output_token_account = log_data.output_token_account;
                         swap_event.amount_0 = log_data.amount_0;
                         swap_event.transfer_fee_0 = log_data.transfer_fee_0;
                         swap_event.amount_1 = log_data.amount_1;
@@ -1028,7 +1032,11 @@ fn enrich_event_from_program_data(
                     }
                 }
                 DexEvent::PancakeSwapSwapV2Event(swap_event) => {
-                    if let Some(log_data) = parse_swap_event_from_program_data(item) {
+                    if let Some(log_data) = parse_swap_event_from_program_data(item, &swap_event.pool_state) {
+                        swap_event.log_pool_state = log_data.pool_state;
+                        swap_event.log_sender = log_data.sender;
+                        swap_event.log_input_token_account = log_data.input_token_account;
+                        swap_event.log_output_token_account = log_data.output_token_account;
                         swap_event.amount_0 = log_data.amount_0;
                         swap_event.transfer_fee_0 = log_data.transfer_fee_0;
                         swap_event.amount_1 = log_data.amount_1;

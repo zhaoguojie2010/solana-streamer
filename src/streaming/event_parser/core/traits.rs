@@ -25,6 +25,11 @@ pub enum DexEvent {
     // PancakeSwap events
     PancakeSwapSwapEvent(PancakeSwapSwapEvent),
     PancakeSwapSwapV2Event(PancakeSwapSwapV2Event),
+    PancakeSwapPoolStateAccountEvent(PancakeSwapPoolStateAccountEvent),
+    PancakeSwapTickArrayStateAccountEvent(PancakeSwapTickArrayStateAccountEvent),
+    PancakeSwapTickArrayBitmapExtensionAccountEvent(
+        PancakeSwapTickArrayBitmapExtensionAccountEvent,
+    ),
 
     // Bonk events
     BonkTradeEvent(BonkTradeEvent),
@@ -121,6 +126,9 @@ impl DexEvent {
         match self {
             DexEvent::PancakeSwapSwapEvent(e) => &e.metadata,
             DexEvent::PancakeSwapSwapV2Event(e) => &e.metadata,
+            DexEvent::PancakeSwapPoolStateAccountEvent(e) => &e.metadata,
+            DexEvent::PancakeSwapTickArrayStateAccountEvent(e) => &e.metadata,
+            DexEvent::PancakeSwapTickArrayBitmapExtensionAccountEvent(e) => &e.metadata,
             DexEvent::BonkTradeEvent(e) => &e.metadata,
             DexEvent::BonkPoolCreateEvent(e) => &e.metadata,
             DexEvent::BonkMigrateToAmmEvent(e) => &e.metadata,
@@ -193,6 +201,9 @@ impl DexEvent {
         match self {
             DexEvent::PancakeSwapSwapEvent(e) => &mut e.metadata,
             DexEvent::PancakeSwapSwapV2Event(e) => &mut e.metadata,
+            DexEvent::PancakeSwapPoolStateAccountEvent(e) => &mut e.metadata,
+            DexEvent::PancakeSwapTickArrayStateAccountEvent(e) => &mut e.metadata,
+            DexEvent::PancakeSwapTickArrayBitmapExtensionAccountEvent(e) => &mut e.metadata,
             DexEvent::BonkTradeEvent(e) => &mut e.metadata,
             DexEvent::BonkPoolCreateEvent(e) => &mut e.metadata,
             DexEvent::BonkMigrateToAmmEvent(e) => &mut e.metadata,

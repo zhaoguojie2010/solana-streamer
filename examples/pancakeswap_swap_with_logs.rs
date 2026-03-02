@@ -67,11 +67,11 @@ fn create_event_callback() -> impl Fn(DexEvent) {
             println!("事件类型: {:?}", e.metadata.event_type);
             println!("交易签名: {}", e.metadata.signature);
             println!("Slot: {}", e.metadata.slot);
-            println!("池子: {}", e.pool);
+            println!("池子: {}", e.pool_state);
             println!("amount: {}", e.amount);
             println!("other_amount_threshold: {}", e.other_amount_threshold);
             println!("sqrt_price_limit: {}", e.sqrt_price_limit);
-            println!("is_base_input: {:?}", e.is_base_input);
+            println!("is_base_input: {}", e.is_base_input);
             println!("input_token_account: {}", e.input_token_account);
             println!("output_token_account: {}", e.output_token_account);
             println!("input_vault: {}", e.input_vault);
@@ -92,11 +92,11 @@ fn create_event_callback() -> impl Fn(DexEvent) {
             println!("事件类型: {:?}", e.metadata.event_type);
             println!("交易签名: {}", e.metadata.signature);
             println!("Slot: {}", e.metadata.slot);
-            println!("池子: {}", e.pool);
+            println!("池子: {}", e.pool_state);
             println!("amount: {}", e.amount);
             println!("other_amount_threshold: {}", e.other_amount_threshold);
             println!("sqrt_price_limit: {}", e.sqrt_price_limit);
-            println!("is_base_input: {:?}", e.is_base_input);
+            println!("is_base_input: {}", e.is_base_input);
             println!("input_token_account: {}", e.input_token_account);
             println!("output_token_account: {}", e.output_token_account);
             println!("input_vault: {}", e.input_vault);

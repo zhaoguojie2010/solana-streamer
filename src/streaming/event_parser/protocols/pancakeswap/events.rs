@@ -1,4 +1,7 @@
 use crate::streaming::event_parser::common::EventMetadata;
+use crate::streaming::event_parser::protocols::pancakeswap::types::{
+    PoolState, TickArrayBitmapExtension, TickArrayState,
+};
 use serde::{Deserialize, Serialize};
 use solana_sdk::pubkey::Pubkey;
 
@@ -11,7 +14,7 @@ pub struct PancakeSwapSwapEvent {
     pub amount: u64,
     pub other_amount_threshold: u64,
     pub sqrt_price_limit: u128,
-    pub is_base_input: Option<bool>,
+    pub is_base_input: bool,
 
     // Program data 日志里的 SwapEvent 数据
     pub amount_0: u64,
@@ -22,20 +25,22 @@ pub struct PancakeSwapSwapEvent {
     pub sqrt_price_x64: u128,
     pub liquidity: u128,
     pub tick: i32,
+    pub log_pool_state: Pubkey,
+    pub log_sender: Pubkey,
+    pub log_input_token_account: Pubkey,
+    pub log_output_token_account: Pubkey,
 
-    // 指令账户（按链上观测到的 account 索引顺序）
-    pub token_authority: Pubkey,
-    pub pool: Pubkey,
+    // 指令账户（IDL）
+    pub payer: Pubkey,
+    pub amm_config: Pubkey,
+    pub pool_state: Pubkey,
     pub input_token_account: Pubkey,
     pub output_token_account: Pubkey,
     pub input_vault: Pubkey,
     pub output_vault: Pubkey,
-    pub account_6: Pubkey,
-    pub account_7: Pubkey,
+    pub observation_state: Pubkey,
     pub token_program: Pubkey,
-    pub account_9: Pubkey,
-    pub account_10: Pubkey,
-    pub account_11: Pubkey,
+    pub tick_array: Pubkey,
     pub remaining_accounts: Vec<Pubkey>,
 }
 
@@ -48,7 +53,7 @@ pub struct PancakeSwapSwapV2Event {
     pub amount: u64,
     pub other_amount_threshold: u64,
     pub sqrt_price_limit: u128,
-    pub is_base_input: Option<bool>,
+    pub is_base_input: bool,
 
     // Program data 日志里的 SwapEvent 数据
     pub amount_0: u64,
@@ -59,29 +64,68 @@ pub struct PancakeSwapSwapV2Event {
     pub sqrt_price_x64: u128,
     pub liquidity: u128,
     pub tick: i32,
+    pub log_pool_state: Pubkey,
+    pub log_sender: Pubkey,
+    pub log_input_token_account: Pubkey,
+    pub log_output_token_account: Pubkey,
 
-    // 指令账户（按链上观测到的 account 索引顺序）
-    pub token_authority: Pubkey,
-    pub pool: Pubkey,
+    // 指令账户（IDL）
+    pub payer: Pubkey,
+    pub amm_config: Pubkey,
+    pub pool_state: Pubkey,
     pub input_token_account: Pubkey,
     pub output_token_account: Pubkey,
     pub input_vault: Pubkey,
     pub output_vault: Pubkey,
+    pub observation_state: Pubkey,
+    pub token_program: Pubkey,
+    pub token_program_2022: Pubkey,
+    pub memo_program: Pubkey,
     pub input_mint: Pubkey,
     pub output_mint: Pubkey,
-    pub account_6: Pubkey,
-    pub account_7: Pubkey,
-    pub token_program_a: Pubkey,
-    pub token_program_b: Pubkey,
-    pub memo_program: Pubkey,
-    pub account_13: Pubkey,
-    pub account_14: Pubkey,
-    pub account_15: Pubkey,
-    pub account_16: Pubkey,
-    pub account_17: Pubkey,
-    pub account_18: Pubkey,
-    pub account_19: Pubkey,
     pub remaining_accounts: Vec<Pubkey>,
+}
+
+/// PancakeSwap PoolState 账户事件
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PancakeSwapPoolStateAccountEvent {
+    pub metadata: EventMetadata,
+    pub pubkey: Pubkey,
+    pub executable: bool,
+    pub lamports: u64,
+    pub owner: Pubkey,
+    pub rent_epoch: u64,
+    #[serde(skip)]
+    pub raw_account_data: Vec<u8>,
+    pub pool_state: PoolState,
+}
+
+/// PancakeSwap TickArrayState 账户事件
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PancakeSwapTickArrayStateAccountEvent {
+    pub metadata: EventMetadata,
+    pub pubkey: Pubkey,
+    pub executable: bool,
+    pub lamports: u64,
+    pub owner: Pubkey,
+    pub rent_epoch: u64,
+    #[serde(skip)]
+    pub raw_account_data: Vec<u8>,
+    pub tick_array_state: TickArrayState,
+}
+
+/// PancakeSwap TickArrayBitmapExtension 账户事件
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PancakeSwapTickArrayBitmapExtensionAccountEvent {
+    pub metadata: EventMetadata,
+    pub pubkey: Pubkey,
+    pub executable: bool,
+    pub lamports: u64,
+    pub owner: Pubkey,
+    pub rent_epoch: u64,
+    #[serde(skip)]
+    pub raw_account_data: Vec<u8>,
+    pub tick_array_bitmap_extension: TickArrayBitmapExtension,
 }
 
 /// 事件鉴别器常量

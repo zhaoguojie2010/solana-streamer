@@ -153,6 +153,9 @@ pub enum EventType {
     AccountBonkVestingRecord,
     AccountPumpFunBondingCurve,
     AccountPumpFunGlobal,
+    AccountPancakeSwapPoolState,
+    AccountPancakeSwapTickArrayState,
+    AccountPancakeSwapTickArrayBitmapExtension,
     AccountRaydiumClmmAmmConfig,
     AccountRaydiumClmmPoolState,
     AccountRaydiumClmmTickArrayState,
@@ -185,6 +188,9 @@ pub const ACCOUNT_EVENT_TYPES: &[EventType] = &[
     EventType::AccountBonkVestingRecord,
     EventType::AccountPumpFunBondingCurve,
     EventType::AccountPumpFunGlobal,
+    EventType::AccountPancakeSwapPoolState,
+    EventType::AccountPancakeSwapTickArrayState,
+    EventType::AccountPancakeSwapTickArrayBitmapExtension,
     EventType::AccountRaydiumClmmAmmConfig,
     EventType::AccountRaydiumClmmPoolState,
     EventType::AccountRaydiumClmmTickArrayState,
@@ -273,6 +279,15 @@ impl fmt::Display for EventType {
             EventType::AccountBonkVestingRecord => write!(f, "AccountBonkVestingRecord"),
             EventType::AccountPumpFunBondingCurve => write!(f, "AccountPumpFunBondingCurve"),
             EventType::AccountPumpFunGlobal => write!(f, "AccountPumpFunGlobal"),
+            EventType::AccountPancakeSwapPoolState => {
+                write!(f, "AccountPancakeSwapPoolState")
+            }
+            EventType::AccountPancakeSwapTickArrayState => {
+                write!(f, "AccountPancakeSwapTickArrayState")
+            }
+            EventType::AccountPancakeSwapTickArrayBitmapExtension => {
+                write!(f, "AccountPancakeSwapTickArrayBitmapExtension")
+            }
             EventType::AccountRaydiumClmmAmmConfig => write!(f, "AccountRaydiumClmmAmmConfig"),
             EventType::AccountRaydiumClmmPoolState => write!(f, "AccountRaydiumClmmPoolState"),
             EventType::AccountRaydiumClmmTickArrayState => {
