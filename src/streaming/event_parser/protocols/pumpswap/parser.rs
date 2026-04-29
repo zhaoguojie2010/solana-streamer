@@ -261,6 +261,7 @@ fn parse_create_pool_instruction(
     } else {
         Pubkey::default()
     };
+    let is_mayhem_mode = data.get(50).copied().unwrap_or_default() != 0;
 
     Some(DexEvent::PumpSwapCreatePoolEvent(PumpSwapCreatePoolEvent {
         metadata,
@@ -278,6 +279,7 @@ fn parse_create_pool_instruction(
         pool_base_token_account: accounts[9],
         pool_quote_token_account: accounts[10],
         coin_creator,
+        is_mayhem_mode,
         ..Default::default()
     }))
 }

@@ -140,12 +140,22 @@ pub fn merge(instruction_event: &mut DexEvent, cpi_log_event: DexEvent) {
                 e.coin_creator = cpie.coin_creator;
                 e.coin_creator_fee_basis_points = cpie.coin_creator_fee_basis_points;
                 e.coin_creator_fee = cpie.coin_creator_fee;
+                e.track_volume = cpie.track_volume;
+                e.total_unclaimed_tokens = cpie.total_unclaimed_tokens;
+                e.total_claimed_tokens = cpie.total_claimed_tokens;
+                e.current_sol_volume = cpie.current_sol_volume;
+                e.last_update_timestamp = cpie.last_update_timestamp;
+                e.min_base_amount_out = cpie.min_base_amount_out;
+                e.ix_name = cpie.ix_name.clone();
+                e.cashback_fee_basis_points = cpie.cashback_fee_basis_points;
+                e.cashback = cpie.cashback;
             }
             _ => {}
         },
         DexEvent::PumpSwapBuyExactQuoteInEvent(e) => match cpi_log_event {
             DexEvent::PumpSwapBuyEvent(cpie) => {
                 e.timestamp = cpie.timestamp;
+                e.min_base_amount_out = cpie.min_base_amount_out;
                 e.actual_base_amount_out = cpie.base_amount_out;
                 e.user_base_token_reserves = cpie.user_base_token_reserves;
                 e.user_quote_token_reserves = cpie.user_quote_token_reserves;
@@ -167,6 +177,8 @@ pub fn merge(instruction_event: &mut DexEvent, cpi_log_event: DexEvent) {
                 e.coin_creator = cpie.coin_creator;
                 e.coin_creator_fee_basis_points = cpie.coin_creator_fee_basis_points;
                 e.coin_creator_fee = cpie.coin_creator_fee;
+                e.cashback_fee_basis_points = cpie.cashback_fee_basis_points;
+                e.cashback = cpie.cashback;
                 e.track_volume = cpie.track_volume;
                 e.total_unclaimed_tokens = cpie.total_unclaimed_tokens;
                 e.total_claimed_tokens = cpie.total_claimed_tokens;
@@ -200,6 +212,8 @@ pub fn merge(instruction_event: &mut DexEvent, cpi_log_event: DexEvent) {
                 e.coin_creator = cpie.coin_creator;
                 e.coin_creator_fee_basis_points = cpie.coin_creator_fee_basis_points;
                 e.coin_creator_fee = cpie.coin_creator_fee;
+                e.cashback_fee_basis_points = cpie.cashback_fee_basis_points;
+                e.cashback = cpie.cashback;
             }
             _ => {}
         },
@@ -225,6 +239,7 @@ pub fn merge(instruction_event: &mut DexEvent, cpi_log_event: DexEvent) {
                 e.user_base_token_account = cpie.user_base_token_account;
                 e.user_quote_token_account = cpie.user_quote_token_account;
                 e.coin_creator = cpie.coin_creator;
+                e.is_mayhem_mode = cpie.is_mayhem_mode;
             }
             _ => {}
         },

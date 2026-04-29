@@ -38,6 +38,10 @@ pub struct PumpSwapBuyEvent {
     pub total_claimed_tokens: u64,
     pub current_sol_volume: u64,
     pub last_update_timestamp: i64,
+    pub min_base_amount_out: u64,
+    pub ix_name: String,
+    pub cashback_fee_basis_points: u64,
+    pub cashback: u64,
     #[borsh(skip)]
     pub base_mint: Pubkey,
     #[borsh(skip)]
@@ -56,13 +60,13 @@ pub struct PumpSwapBuyEvent {
     pub quote_token_program: Pubkey,
 }
 
-pub const PUMP_SWAP_BUY_EVENT_LOG_SIZE: usize = 385;
+pub const PUMP_SWAP_BUY_EVENT_LOG_SIZE: usize = 413;
 
 pub fn pump_swap_buy_event_log_decode(data: &[u8]) -> Option<PumpSwapBuyEvent> {
     if data.len() < PUMP_SWAP_BUY_EVENT_LOG_SIZE {
         return None;
     }
-    borsh::from_slice::<PumpSwapBuyEvent>(&data[..PUMP_SWAP_BUY_EVENT_LOG_SIZE]).ok()
+    borsh::from_slice::<PumpSwapBuyEvent>(data).ok()
 }
 
 /// 精确报价买入事件（BuyExactQuoteIn）
@@ -98,6 +102,8 @@ pub struct PumpSwapBuyExactQuoteInEvent {
     pub coin_creator: Pubkey,
     pub coin_creator_fee_basis_points: u64,
     pub coin_creator_fee: u64,
+    pub cashback_fee_basis_points: u64,
+    pub cashback: u64,
     pub track_volume: bool,
     pub total_unclaimed_tokens: u64,
     pub total_claimed_tokens: u64,
@@ -141,6 +147,8 @@ pub struct PumpSwapSellEvent {
     pub coin_creator: Pubkey,
     pub coin_creator_fee_basis_points: u64,
     pub coin_creator_fee: u64,
+    pub cashback_fee_basis_points: u64,
+    pub cashback: u64,
     #[borsh(skip)]
     pub base_mint: Pubkey,
     #[borsh(skip)]
@@ -159,7 +167,7 @@ pub struct PumpSwapSellEvent {
     pub quote_token_program: Pubkey,
 }
 
-pub const PUMP_SWAP_SELL_EVENT_LOG_SIZE: usize = 352;
+pub const PUMP_SWAP_SELL_EVENT_LOG_SIZE: usize = 368;
 
 pub fn pump_swap_sell_event_log_decode(data: &[u8]) -> Option<PumpSwapSellEvent> {
     if data.len() < PUMP_SWAP_SELL_EVENT_LOG_SIZE {
@@ -193,6 +201,7 @@ pub struct PumpSwapCreatePoolEvent {
     pub user_base_token_account: Pubkey,
     pub user_quote_token_account: Pubkey,
     pub coin_creator: Pubkey,
+    pub is_mayhem_mode: bool,
     #[borsh(skip)]
     pub user_pool_token_account: Pubkey,
     #[borsh(skip)]
@@ -201,7 +210,7 @@ pub struct PumpSwapCreatePoolEvent {
     pub pool_quote_token_account: Pubkey,
 }
 
-pub const PUMP_SWAP_CREATE_POOL_EVENT_LOG_SIZE: usize = 325;
+pub const PUMP_SWAP_CREATE_POOL_EVENT_LOG_SIZE: usize = 326;
 
 pub fn pump_swap_create_pool_event_log_decode(data: &[u8]) -> Option<PumpSwapCreatePoolEvent> {
     if data.len() < PUMP_SWAP_CREATE_POOL_EVENT_LOG_SIZE {
