@@ -141,6 +141,7 @@ fn parse_buy_instruction(
 
     let base_amount_out = read_u64_le(data, 0)?;
     let max_quote_amount_in = read_u64_le(data, 8)?;
+    let track_volume = data.get(16).copied().unwrap_or(0) != 0;
 
     Some(DexEvent::PumpSwapBuyEvent(PumpSwapBuyEvent {
         metadata,
@@ -160,13 +161,14 @@ fn parse_buy_instruction(
         quote_token_program: accounts[12],
         coin_creator_vault_ata: accounts.get(17).copied().unwrap_or_default(),
         coin_creator_vault_authority: accounts.get(18).copied().unwrap_or_default(),
+        track_volume,
         ..Default::default()
     }))
 }
 
 /// 解析买入指令事件（BuyExactQuoteIn）
 ///
-/// 参数布局: quote_amount_in(u64), min_base_amount_out(u64)
+/// 参数布局: quote_amount_in(u64), min_base_amount_out(u64), track_volume(OptionBool)
 fn parse_buy_exact_quote_in_instruction(
     data: &[u8],
     accounts: &[Pubkey],
@@ -180,6 +182,7 @@ fn parse_buy_exact_quote_in_instruction(
 
     let quote_amount_in = read_u64_le(data, 0)?;
     let min_base_amount_out = read_u64_le(data, 8)?;
+    let track_volume = data.get(16).copied().unwrap_or(0) != 0;
 
     Some(DexEvent::PumpSwapBuyExactQuoteInEvent(PumpSwapBuyExactQuoteInEvent {
         metadata,
@@ -200,6 +203,7 @@ fn parse_buy_exact_quote_in_instruction(
         quote_token_program: accounts[12],
         coin_creator_vault_ata: accounts.get(17).copied().unwrap_or_default(),
         coin_creator_vault_authority: accounts.get(18).copied().unwrap_or_default(),
+        track_volume,
         ..Default::default()
     }))
 }
