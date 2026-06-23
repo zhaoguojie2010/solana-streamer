@@ -32,6 +32,13 @@ struct MintLeg {
     to_mint: Pubkey,
 }
 
+#[derive(Clone, Copy)]
+struct AccountLeg {
+    event_index: usize,
+    from_account: Pubkey,
+    to_account: Pubkey,
+}
+
 impl EventParser {
     // ================================================================================================
     // Public API - Entry Points
@@ -758,6 +765,49 @@ impl EventParser {
         }
     }
 
+    #[inline]
+    fn extract_swap_token_accounts(event: &DexEvent) -> Option<(Pubkey, Pubkey)> {
+        let (from_account, to_account) = match event {
+            DexEvent::BonkTradeEvent(e) => match e.trade_direction {
+                crate::streaming::event_parser::protocols::bonk::types::TradeDirection::Buy => {
+                    (e.user_quote_token, e.user_base_token)
+                }
+                crate::streaming::event_parser::protocols::bonk::types::TradeDirection::Sell => {
+                    (e.user_base_token, e.user_quote_token)
+                }
+            },
+            DexEvent::PancakeSwapSwapEvent(e) => (e.input_token_account, e.output_token_account),
+            DexEvent::PancakeSwapSwapV2Event(e) => (e.input_token_account, e.output_token_account),
+            DexEvent::RaydiumAmmV4SwapEvent(e) => {
+                (e.user_source_token_account, e.user_destination_token_account)
+            }
+            DexEvent::RaydiumClmmSwapEvent(e) => (e.input_token_account, e.output_token_account),
+            DexEvent::RaydiumClmmSwapV2Event(e) => (e.input_token_account, e.output_token_account),
+            DexEvent::MeteoraDlmmSwapEvent(e) => (e.user_token_in?, e.user_token_out?),
+            DexEvent::MeteoraDlmmSwap2Event(e) => (e.user_token_in?, e.user_token_out?),
+            DexEvent::WhirlpoolSwapEvent(e) => {
+                if e.a_to_b {
+                    (e.token_owner_account_a, e.token_owner_account_b)
+                } else {
+                    (e.token_owner_account_b, e.token_owner_account_a)
+                }
+            }
+            DexEvent::WhirlpoolSwapV2Event(e) => {
+                if e.a_to_b {
+                    (e.token_owner_account_a, e.token_owner_account_b)
+                } else {
+                    (e.token_owner_account_b, e.token_owner_account_a)
+                }
+            }
+            _ => return None,
+        };
+        if from_account == Pubkey::default() || to_account == Pubkey::default() {
+            None
+        } else {
+            Some((from_account, to_account))
+        }
+    }
+
     fn mark_arb_segment(events: &mut [DexEvent], legs: &[MintLeg]) {
         if legs.len() < 2 {
             return;
@@ -777,38 +827,87 @@ impl EventParser {
         }
     }
 
+    fn mark_arb_account_segment(events: &mut [DexEvent], legs: &[AccountLeg]) {
+        if legs.len() < 2 {
+            return;
+        }
+        let Some(first_leg) = legs.first() else {
+            return;
+        };
+        let Some(last_leg) = legs.last() else {
+            return;
+        };
+        if first_leg.from_account != last_leg.to_account {
+            return;
+        }
+
+        for leg in legs.iter() {
+            events[leg.event_index].metadata_mut().is_arb_leg = true;
+        }
+    }
+
     #[inline]
     fn mark_arb_inner_swap_events(events: &mut [DexEvent]) {
-        let mut segment_legs: Vec<MintLeg> = Vec::new();
+        let mut account_legs: Vec<AccountLeg> = Vec::new();
+        let mut mint_legs: Vec<MintLeg> = Vec::new();
         for event_index in 0..events.len() {
-            let (is_inner, swap_mints) = {
+            let (is_inner, swap_accounts, swap_mints) = {
                 let event = &events[event_index];
                 let metadata = event.metadata();
-                (metadata.inner_index.is_some(), Self::extract_swap_mints(event))
+                (
+                    metadata.inner_index.is_some(),
+                    Self::extract_swap_token_accounts(event),
+                    Self::extract_swap_mints(event),
+                )
             };
 
             if !is_inner {
                 continue;
             }
 
+            if let Some((from_account, to_account)) = swap_accounts {
+                let next_leg = AccountLeg {
+                    event_index,
+                    from_account,
+                    to_account,
+                };
+
+                if let Some(last_leg) = account_legs.last() {
+                    if last_leg.to_account != next_leg.from_account {
+                        Self::mark_arb_account_segment(events, &account_legs);
+                        account_legs.clear();
+                    }
+                }
+                account_legs.push(next_leg);
+                continue;
+            }
+
+            Self::mark_arb_account_segment(events, &account_legs);
+            account_legs.clear();
+
             let Some((from_mint, to_mint)) = swap_mints else {
-                Self::mark_arb_segment(events, &segment_legs);
-                segment_legs.clear();
+                Self::mark_arb_segment(events, &mint_legs);
+                mint_legs.clear();
                 continue;
             };
 
-            let next_leg = MintLeg { event_index, from_mint, to_mint };
+            let next_leg = MintLeg {
+                event_index,
+                from_mint,
+                to_mint,
+            };
 
-            if let Some(last_leg) = segment_legs.last() {
+            if let Some(last_leg) = mint_legs.last() {
                 if last_leg.to_mint != next_leg.from_mint {
-                    Self::mark_arb_segment(events, &segment_legs);
-                    segment_legs.clear();
+                    Self::mark_arb_segment(events, &mint_legs);
+                    mint_legs.clear();
                 }
             }
-            segment_legs.push(next_leg);
+            mint_legs.push(next_leg);
         }
 
-        Self::mark_arb_segment(events, &segment_legs);
+        Self::mark_arb_account_segment(events, &account_legs);
+        Self::mark_arb_segment(events, &mint_legs);
     }
 
     fn instruction_needs_program_data(protocol: &Protocol, data: &[u8]) -> bool {
