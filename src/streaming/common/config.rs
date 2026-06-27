@@ -1,4 +1,5 @@
 use super::constants::*;
+use crate::streaming::event_parser::common::SwapCuParseConfig;
 
 /// Connection configuration
 #[derive(Debug, Clone)]
@@ -28,10 +29,16 @@ pub struct StreamClientConfig {
     pub connection: ConnectionConfig,
     /// Whether performance monitoring is enabled (default: false)
     pub enable_metrics: bool,
+    /// Optional swap compute-unit parsing. None means no CU log parsing overhead.
+    pub swap_cu_parse_config: Option<SwapCuParseConfig>,
 }
 
 impl Default for StreamClientConfig {
     fn default() -> Self {
-        Self { connection: ConnectionConfig::default(), enable_metrics: false }
+        Self {
+            connection: ConnectionConfig::default(),
+            enable_metrics: false,
+            swap_cu_parse_config: None,
+        }
     }
 }

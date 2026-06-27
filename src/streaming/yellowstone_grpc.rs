@@ -179,6 +179,7 @@ impl YellowstoneGrpc {
 
         // Wrap callback once before the async block
         let callback = Arc::new(callback);
+        let swap_cu_parse_config = self.config.swap_cu_parse_config.clone();
 
         let stream_handle = tokio::spawn(async move {
             loop {
@@ -195,6 +196,7 @@ impl YellowstoneGrpc {
                                             EventPretty::Account(account_pretty),
                                             &protocols,
                                             event_type_filter.as_ref(),
+                                            swap_cu_parse_config.as_ref(),
                                             callback.clone(),
                                             bot_wallet,
                                         )
@@ -210,6 +212,7 @@ impl YellowstoneGrpc {
                                             EventPretty::BlockMeta(block_meta_pretty),
                                             &protocols,
                                             event_type_filter.as_ref(),
+                                            swap_cu_parse_config.as_ref(),
                                             callback.clone(),
                                             bot_wallet,
                                         )
@@ -229,6 +232,7 @@ impl YellowstoneGrpc {
                                             EventPretty::Transaction(transaction_pretty),
                                             &protocols,
                                             event_type_filter.as_ref(),
+                                            swap_cu_parse_config.as_ref(),
                                             callback.clone(),
                                             bot_wallet,
                                         )

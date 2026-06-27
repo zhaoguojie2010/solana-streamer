@@ -44,6 +44,7 @@ impl ShredStreamGrpc {
 
         // Wrap callback once before the async block
         let callback = Arc::new(callback);
+        let swap_cu_parse_config = self.config.swap_cu_parse_config.clone();
 
         let stream_task = tokio::spawn(async move {
             while let Some(message) = stream.next().await {
@@ -63,6 +64,7 @@ impl ShredStreamGrpc {
                                         transaction_with_slot,
                                         &protocols,
                                         event_type_filter.as_ref(),
+                                        swap_cu_parse_config.as_ref(),
                                         callback.clone(),
                                         bot_wallet,
                                     )

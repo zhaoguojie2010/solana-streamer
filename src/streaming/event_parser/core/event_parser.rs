@@ -1,7 +1,8 @@
 use crate::streaming::event_parser::{
     common::{
         build_program_data_index, filter::EventTypeFilter,
-        high_performance_clock::elapsed_micros_since, EventMetadata, ProgramDataIndex,
+        build_swap_cu_index, high_performance_clock::elapsed_micros_since, EventMetadata,
+        ProgramDataIndex, SwapCuIndex, SwapCuParseConfig,
     },
     core::{
         dispatcher::EventDispatcher,
@@ -58,6 +59,7 @@ impl EventParser {
         recv_us: i64,
         bot_wallet: Option<Pubkey>,
         transaction_index: Option<u64>,
+        swap_cu_parse_config: Option<&SwapCuParseConfig>,
         callback: Arc<dyn Fn(DexEvent) + Send + Sync>,
     ) -> anyhow::Result<()> {
         // 创建适配器回调，将所有权回调转换为引用回调
@@ -115,6 +117,7 @@ impl EventParser {
                     &log_messages,
                     bot_wallet,
                     transaction_index,
+                    swap_cu_parse_config,
                     adapter_callback,
                 )
                 .await?;
@@ -141,6 +144,7 @@ impl EventParser {
         inner_instructions: &[InnerInstructions],
         bot_wallet: Option<Pubkey>,
         transaction_index: Option<u64>,
+        _swap_cu_parse_config: Option<&SwapCuParseConfig>,
         callback: Arc<dyn Fn(DexEvent) + Send + Sync>,
     ) -> anyhow::Result<()> {
         // 创建适配器回调，将所有权回调转换为引用回调
@@ -236,6 +240,7 @@ impl EventParser {
         log_messages: &[String],
         bot_wallet: Option<Pubkey>,
         transaction_index: Option<u64>,
+        swap_cu_parse_config: Option<&SwapCuParseConfig>,
         callback: Arc<dyn for<'a> Fn(&'a DexEvent) + Send + Sync>,
     ) -> anyhow::Result<()> {
         // 获取交易的指令和账户
@@ -247,6 +252,7 @@ impl EventParser {
         if has_program {
             // 解析每个指令
             let mut program_data_index: Option<ProgramDataIndex> = None;
+            let mut swap_cu_index: Option<SwapCuIndex> = None;
             for (index, instruction) in compiled_instructions.iter().enumerate() {
                 if let Some(program_id) = accounts.get(instruction.program_id_index as usize) {
                     let program_id = *program_id; // 克隆程序ID，避免借用冲突
@@ -287,6 +293,11 @@ impl EventParser {
                             transaction_index,
                             inner_instructions,
                             program_data_index.as_ref(),
+                            swap_cu_parse_config,
+                            &mut swap_cu_index,
+                            log_messages,
+                            compiled_instructions,
+                            all_inner_instructions,
                             callback.clone(),
                         )?;
                     }
@@ -340,6 +351,11 @@ impl EventParser {
                                 transaction_index,
                                 Some(&inner_instructions),
                                 program_data_index.as_ref(),
+                                swap_cu_parse_config,
+                                &mut swap_cu_index,
+                                log_messages,
+                                compiled_instructions,
+                                all_inner_instructions,
                             )? {
                                 inner_events.push(inner_event);
                             }
@@ -376,6 +392,11 @@ impl EventParser {
         transaction_index: Option<u64>,
         inner_instructions: Option<&yellowstone_grpc_proto::prelude::InnerInstructions>,
         program_data_index: Option<&ProgramDataIndex>,
+        swap_cu_parse_config: Option<&SwapCuParseConfig>,
+        swap_cu_index: &mut Option<SwapCuIndex>,
+        log_messages: &[String],
+        compiled_instructions: &[yellowstone_grpc_proto::prelude::CompiledInstruction],
+        all_inner_instructions: &[yellowstone_grpc_proto::prelude::InnerInstructions],
         callback: Arc<dyn for<'a> Fn(&'a DexEvent) + Send + Sync>,
     ) -> anyhow::Result<()> {
         if let Some(event) = Self::parse_event_from_grpc_instruction(
@@ -393,6 +414,11 @@ impl EventParser {
             transaction_index,
             inner_instructions,
             program_data_index,
+            swap_cu_parse_config,
+            swap_cu_index,
+            log_messages,
+            compiled_instructions,
+            all_inner_instructions,
         )? {
             callback(&event);
         }
@@ -416,6 +442,11 @@ impl EventParser {
         transaction_index: Option<u64>,
         inner_instructions: Option<&yellowstone_grpc_proto::prelude::InnerInstructions>,
         program_data_index: Option<&ProgramDataIndex>,
+        swap_cu_parse_config: Option<&SwapCuParseConfig>,
+        swap_cu_index: &mut Option<SwapCuIndex>,
+        log_messages: &[String],
+        compiled_instructions: &[yellowstone_grpc_proto::prelude::CompiledInstruction],
+        all_inner_instructions: &[yellowstone_grpc_proto::prelude::InnerInstructions],
     ) -> anyhow::Result<Option<DexEvent>> {
         // 添加边界检查以防止越界访问
         let program_id_index = instruction.program_id_index as usize;
@@ -490,6 +521,28 @@ impl EventParser {
             Some(e) => e,
             None => return Ok(None),
         };
+
+        if let Some(config) = swap_cu_parse_config.filter(|config| {
+            config.enabled
+                && config.is_target_swap(&protocol, &program_id, &instruction.data)
+                && !log_messages.is_empty()
+        }) {
+            if swap_cu_index.is_none() {
+                *swap_cu_index = Some(build_swap_cu_index(
+                    config,
+                    log_messages,
+                    compiled_instructions,
+                    accounts,
+                    all_inner_instructions,
+                ));
+            }
+            if let Some(cu) = swap_cu_index
+                .as_ref()
+                .and_then(|index| index.get(outer_index, inner_index))
+            {
+                event.metadata_mut().swap_compute_units = Some(cu);
+            }
+        }
 
         enrich_event_from_program_data(
             &mut event,

@@ -1,6 +1,7 @@
 use crate::common::AnyResult;
 use crate::streaming::common::MetricsEventType;
 use crate::streaming::event_parser::common::filter::EventTypeFilter;
+use crate::streaming::event_parser::common::SwapCuParseConfig;
 use crate::streaming::event_parser::core::account_event_parser::AccountEventParser;
 use crate::streaming::event_parser::core::common_event_parser::CommonEventParser;
 use crate::streaming::event_parser::core::event_parser::EventParser;
@@ -40,6 +41,7 @@ pub async fn process_grpc_transaction(
     event_pretty: EventPretty,
     protocols: &[Protocol],
     event_type_filter: Option<&EventTypeFilter>,
+    swap_cu_parse_config: Option<&SwapCuParseConfig>,
     callback: Arc<dyn Fn(DexEvent) + Send + Sync>,
     bot_wallet: Option<Pubkey>,
 ) -> AnyResult<()> {
@@ -81,6 +83,7 @@ pub async fn process_grpc_transaction(
                 recv_us,
                 bot_wallet,
                 transaction_index,
+                swap_cu_parse_config,
                 adapter_callback,
             )
             .await?;
@@ -114,6 +117,7 @@ pub async fn process_shred_transaction(
     transaction_with_slot: TransactionWithSlot,
     protocols: &[Protocol],
     event_type_filter: Option<&EventTypeFilter>,
+    swap_cu_parse_config: Option<&SwapCuParseConfig>,
     callback: Arc<dyn Fn(DexEvent) + Send + Sync>,
     bot_wallet: Option<Pubkey>,
 ) -> AnyResult<()> {
@@ -144,6 +148,7 @@ pub async fn process_shred_transaction(
         &[],
         bot_wallet,
         None,
+        swap_cu_parse_config,
         adapter_callback,
     )
     .await?;
