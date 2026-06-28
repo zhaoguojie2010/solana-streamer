@@ -829,6 +829,15 @@ impl EventParser {
                     (e.user_base_token, e.user_quote_token)
                 }
             },
+            DexEvent::PumpSwapBuyEvent(e) => {
+                (e.user_quote_token_account, e.user_base_token_account)
+            }
+            DexEvent::PumpSwapBuyExactQuoteInEvent(e) => {
+                (e.user_quote_token_account, e.user_base_token_account)
+            }
+            DexEvent::PumpSwapSellEvent(e) => {
+                (e.user_base_token_account, e.user_quote_token_account)
+            }
             DexEvent::PancakeSwapSwapEvent(e) => (e.input_token_account, e.output_token_account),
             DexEvent::PancakeSwapSwapV2Event(e) => (e.input_token_account, e.output_token_account),
             DexEvent::RaydiumAmmV4SwapEvent(e) => {
