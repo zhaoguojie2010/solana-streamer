@@ -5,10 +5,12 @@ use solana_sdk::pubkey::Pubkey;
 
 use crate::common::AnyResult;
 use crate::protos::shredstream::SubscribeEntriesRequest;
-use crate::streaming::common::{process_shred_transaction, SubscriptionHandle};
+use crate::streaming::common::{
+    process_shred_transaction, process_shred_tx_events, SubscriptionHandle,
+};
 use crate::streaming::event_parser::common::filter::EventTypeFilter;
 use crate::streaming::event_parser::common::high_performance_clock::get_high_perf_clock;
-use crate::streaming::event_parser::{DexEvent, Protocol};
+use crate::streaming::event_parser::{DexEvent, Protocol, TxDexEvents};
 use crate::streaming::grpc::MetricsManager;
 use crate::streaming::shred::pool::factory;
 use log::error;
@@ -86,6 +88,80 @@ impl ShredStreamGrpc {
         });
 
         // 保存订阅句柄
+        let subscription_handle = SubscriptionHandle::new(stream_task, None, metrics_handle);
+        let mut handle_guard = self.subscription_handle.lock().await;
+        *handle_guard = Some(subscription_handle);
+
+        Ok(())
+    }
+
+    /// 订阅交易级 ShredStream DEX 事件。
+    pub async fn shredstream_subscribe_tx_events<F>(
+        &self,
+        protocols: Vec<Protocol>,
+        bot_wallet: Option<Pubkey>,
+        event_type_filter: Option<EventTypeFilter>,
+        callback: F,
+    ) -> AnyResult<()>
+    where
+        F: Fn(TxDexEvents) + Send + Sync + 'static,
+    {
+        self.stop().await;
+
+        let mut metrics_handle = None;
+        if self.config.enable_metrics {
+            metrics_handle = MetricsManager::global().start_auto_monitoring().await;
+        }
+
+        let mut client = (*self.shredstream_client).clone();
+        let request = tonic::Request::new(SubscribeEntriesRequest {});
+        let mut stream = client.subscribe_entries(request).await?.into_inner();
+
+        let callback = Arc::new(callback);
+        let swap_cu_parse_config = self.config.swap_cu_parse_config.clone();
+
+        let stream_task = tokio::spawn(async move {
+            while let Some(message) = stream.next().await {
+                match message {
+                    Ok(msg) => {
+                        if let Ok(entries) = bincode::deserialize::<Vec<Entry>>(&msg.entries) {
+                            for (entry_index, entry) in entries.into_iter().enumerate() {
+                                for (tx_index, transaction) in
+                                    entry.transactions.into_iter().enumerate()
+                                {
+                                    let transaction_with_slot =
+                                        factory::create_transaction_with_slot_pooled(
+                                            transaction,
+                                            msg.slot,
+                                            get_high_perf_clock(),
+                                        );
+                                    if let Err(e) = process_shred_tx_events(
+                                        transaction_with_slot,
+                                        &protocols,
+                                        event_type_filter.as_ref(),
+                                        swap_cu_parse_config.as_ref(),
+                                        callback.clone(),
+                                        bot_wallet,
+                                        Some(entry_index as u64),
+                                        Some(tx_index as u64),
+                                    )
+                                    .await
+                                    {
+                                        error!("Error handling tx events message: {e:?}");
+                                    }
+                                }
+                            }
+                        }
+                        continue;
+                    }
+                    Err(error) => {
+                        error!("Stream error: {error:?}");
+                        break;
+                    }
+                }
+            }
+        });
+
         let subscription_handle = SubscriptionHandle::new(stream_task, None, metrics_handle);
         let mut handle_guard = self.subscription_handle.lock().await;
         *handle_guard = Some(subscription_handle);

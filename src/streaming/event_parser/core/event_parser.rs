@@ -1,8 +1,8 @@
 use crate::streaming::event_parser::{
     common::{
-        build_program_data_index, filter::EventTypeFilter,
-        build_swap_cu_index, high_performance_clock::elapsed_micros_since, EventMetadata,
-        ProgramDataIndex, SwapCuIndex, SwapCuParseConfig,
+        build_program_data_index, build_swap_cu_index, filter::EventTypeFilter,
+        high_performance_clock::elapsed_micros_since, EventMetadata, ProgramDataIndex, SwapCuIndex,
+        SwapCuParseConfig,
     },
     core::{
         dispatcher::EventDispatcher,
@@ -13,8 +13,9 @@ use crate::streaming::event_parser::{
         merger_event::merge,
     },
     protocols::raydium_amm_v4::parser::RAYDIUM_AMM_V4_PROGRAM_ID,
-    DexEvent, Protocol,
+    DexEvent, Protocol, TxDexEvents,
 };
+use parking_lot::Mutex;
 use prost_types::Timestamp;
 use solana_sdk::{
     message::compiled_instruction::CompiledInstruction, pubkey::Pubkey, signature::Signature,
@@ -127,6 +128,57 @@ impl EventParser {
         Ok(())
     }
 
+    /// Collect all DEX events parsed from one gRPC transaction without reordering them.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn parse_grpc_transaction_to_events(
+        protocols: &[Protocol],
+        event_type_filter: Option<&EventTypeFilter>,
+        grpc_tx: SubscribeUpdateTransactionInfo,
+        signature: Signature,
+        slot: Option<u64>,
+        block_time: Option<Timestamp>,
+        recv_us: i64,
+        bot_wallet: Option<Pubkey>,
+        transaction_index: Option<u64>,
+        swap_cu_parse_config: Option<&SwapCuParseConfig>,
+    ) -> anyhow::Result<Option<TxDexEvents>> {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let collected = events.clone();
+        let callback = Arc::new(move |event: DexEvent| {
+            collected.lock().push(event);
+        });
+
+        Self::parse_grpc_transaction(
+            protocols,
+            event_type_filter,
+            grpc_tx,
+            signature,
+            slot,
+            block_time,
+            recv_us,
+            bot_wallet,
+            transaction_index,
+            swap_cu_parse_config,
+            callback,
+        )
+        .await?;
+
+        let events = events.lock().clone();
+        if events.is_empty() {
+            return Ok(None);
+        }
+
+        Ok(Some(TxDexEvents {
+            signature,
+            slot: slot.unwrap_or(0),
+            transaction_index,
+            entry_index: None,
+            tx_index_in_entry: None,
+            recv_us,
+            events,
+        }))
+    }
+
     /// Parse transaction from VersionedTransaction
     ///
     /// This is the entry point for parsing VersionedTransaction objects.
@@ -216,6 +268,63 @@ impl EventParser {
             }
         }
         Ok(())
+    }
+
+    /// Collect all DEX events parsed from one VersionedTransaction without reordering them.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn parse_versioned_transaction_to_events(
+        protocols: &[Protocol],
+        event_type_filter: Option<&EventTypeFilter>,
+        transaction: &VersionedTransaction,
+        signature: Signature,
+        slot: Option<u64>,
+        block_time: Option<Timestamp>,
+        recv_us: i64,
+        accounts: &[Pubkey],
+        inner_instructions: &[InnerInstructions],
+        bot_wallet: Option<Pubkey>,
+        transaction_index: Option<u64>,
+        entry_index: Option<u64>,
+        tx_index_in_entry: Option<u64>,
+        swap_cu_parse_config: Option<&SwapCuParseConfig>,
+    ) -> anyhow::Result<Option<TxDexEvents>> {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let collected = events.clone();
+        let callback = Arc::new(move |event: DexEvent| {
+            collected.lock().push(event);
+        });
+
+        Self::parse_instruction_events_from_versioned_transaction(
+            protocols,
+            event_type_filter,
+            transaction,
+            signature,
+            slot,
+            block_time,
+            recv_us,
+            accounts,
+            inner_instructions,
+            bot_wallet,
+            transaction_index,
+            swap_cu_parse_config,
+            callback,
+        )
+        .await?;
+
+        let events = events.lock().clone();
+        if events.is_empty() {
+            return Ok(None);
+        }
+
+        Ok(Some(TxDexEvents {
+            signature,
+            slot: slot.unwrap_or(0),
+            transaction_index,
+            entry_index,
+            tx_index_in_entry,
+            recv_us,
+            events,
+        }))
     }
 
     // ================================================================================================
@@ -536,9 +645,8 @@ impl EventParser {
                     all_inner_instructions,
                 ));
             }
-            if let Some(cu) = swap_cu_index
-                .as_ref()
-                .and_then(|index| index.get(outer_index, inner_index))
+            if let Some(cu) =
+                swap_cu_index.as_ref().and_then(|index| index.get(outer_index, inner_index))
             {
                 event.metadata_mut().swap_compute_units = Some(cu);
             }
@@ -928,11 +1036,7 @@ impl EventParser {
             }
 
             if let Some((from_account, to_account)) = swap_accounts {
-                let next_leg = AccountLeg {
-                    event_index,
-                    from_account,
-                    to_account,
-                };
+                let next_leg = AccountLeg { event_index, from_account, to_account };
 
                 if let Some(last_leg) = account_legs.last() {
                     if last_leg.to_account != next_leg.from_account {
@@ -953,11 +1057,7 @@ impl EventParser {
                 continue;
             };
 
-            let next_leg = MintLeg {
-                event_index,
-                from_mint,
-                to_mint,
-            };
+            let next_leg = MintLeg { event_index, from_mint, to_mint };
 
             if let Some(last_leg) = mint_legs.last() {
                 if last_leg.to_mint != next_leg.from_mint {
@@ -1177,7 +1277,9 @@ fn enrich_event_from_program_data(
             use crate::streaming::event_parser::protocols::pancakeswap::parser::parse_swap_event_from_program_data;
             match event {
                 DexEvent::PancakeSwapSwapEvent(swap_event) => {
-                    if let Some(log_data) = parse_swap_event_from_program_data(item, &swap_event.pool_state) {
+                    if let Some(log_data) =
+                        parse_swap_event_from_program_data(item, &swap_event.pool_state)
+                    {
                         swap_event.log_pool_state = log_data.pool_state;
                         swap_event.log_sender = log_data.sender;
                         swap_event.log_input_token_account = log_data.input_token_account;
@@ -1193,7 +1295,9 @@ fn enrich_event_from_program_data(
                     }
                 }
                 DexEvent::PancakeSwapSwapV2Event(swap_event) => {
-                    if let Some(log_data) = parse_swap_event_from_program_data(item, &swap_event.pool_state) {
+                    if let Some(log_data) =
+                        parse_swap_event_from_program_data(item, &swap_event.pool_state)
+                    {
                         swap_event.log_pool_state = log_data.pool_state;
                         swap_event.log_sender = log_data.sender;
                         swap_event.log_input_token_account = log_data.input_token_account;

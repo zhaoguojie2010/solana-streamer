@@ -17,7 +17,19 @@ use crate::streaming::event_parser::protocols::raydium_clmm::events::*;
 use crate::streaming::event_parser::protocols::raydium_cpmm::events::*;
 use crate::streaming::event_parser::protocols::whirlpool::events::*;
 use serde::{Deserialize, Serialize};
+use solana_sdk::signature::Signature;
 use std::fmt::Debug;
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TxDexEvents {
+    pub signature: Signature,
+    pub slot: u64,
+    pub transaction_index: Option<u64>,
+    pub entry_index: Option<u64>,
+    pub tx_index_in_entry: Option<u64>,
+    pub recv_us: i64,
+    pub events: Vec<DexEvent>,
+}
 
 /// Unified Event Enum - Replaces the trait-based approach with a type-safe enum
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

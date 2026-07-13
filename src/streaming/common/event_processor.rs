@@ -5,7 +5,7 @@ use crate::streaming::event_parser::common::SwapCuParseConfig;
 use crate::streaming::event_parser::core::account_event_parser::AccountEventParser;
 use crate::streaming::event_parser::core::common_event_parser::CommonEventParser;
 use crate::streaming::event_parser::core::event_parser::EventParser;
-use crate::streaming::event_parser::{core::traits::DexEvent, Protocol};
+use crate::streaming::event_parser::{core::traits::DexEvent, Protocol, TxDexEvents};
 use crate::streaming::grpc::{EventPretty, MetricsManager};
 use crate::streaming::shred::TransactionWithSlot;
 use solana_sdk::pubkey::Pubkey;
@@ -33,6 +33,35 @@ fn create_metrics_callback(
             recv_us,
             block_time_ms,
         );
+    })
+}
+
+#[inline]
+fn create_tx_metrics_callback(
+    callback: Arc<dyn Fn(TxDexEvents) + Send + Sync>,
+) -> Arc<dyn Fn(TxDexEvents) + Send + Sync> {
+    Arc::new(move |tx_events: TxDexEvents| {
+        let metrics = tx_events.events.first().map(|event| {
+            let metadata = event.metadata();
+            (
+                tx_events.events.len() as u64,
+                metadata.handle_us as f64,
+                metadata.recv_us,
+                metadata.block_time_ms,
+            )
+        });
+
+        callback(tx_events);
+
+        if let Some((count, processing_time_us, recv_us, block_time_ms)) = metrics {
+            update_metrics_with_latency(
+                MetricsEventType::Transaction,
+                count,
+                processing_time_us,
+                recv_us,
+                block_time_ms,
+            );
+        }
     })
 }
 
@@ -112,6 +141,48 @@ pub async fn process_grpc_transaction(
     Ok(())
 }
 
+/// Process one GRPC transaction as a transaction-level DEX event batch.
+pub async fn process_grpc_tx_events(
+    event_pretty: EventPretty,
+    protocols: &[Protocol],
+    event_type_filter: Option<&EventTypeFilter>,
+    swap_cu_parse_config: Option<&SwapCuParseConfig>,
+    callback: Arc<dyn Fn(TxDexEvents) + Send + Sync>,
+    bot_wallet: Option<Pubkey>,
+) -> AnyResult<()> {
+    let EventPretty::Transaction(transaction_pretty) = event_pretty else {
+        return Ok(());
+    };
+
+    MetricsManager::global().add_tx_process_count();
+
+    let slot = transaction_pretty.slot;
+    let signature = transaction_pretty.signature;
+    let block_time = transaction_pretty.block_time;
+    let recv_us = transaction_pretty.recv_us;
+    let transaction_index = transaction_pretty.transaction_index;
+    let grpc_tx = transaction_pretty.grpc_tx;
+
+    if let Some(tx_events) = EventParser::parse_grpc_transaction_to_events(
+        protocols,
+        event_type_filter,
+        grpc_tx,
+        signature,
+        Some(slot),
+        block_time,
+        recv_us,
+        bot_wallet,
+        transaction_index,
+        swap_cu_parse_config,
+    )
+    .await?
+    {
+        create_tx_metrics_callback(callback)(tx_events);
+    }
+
+    Ok(())
+}
+
 /// Process Shred transaction events
 pub async fn process_shred_transaction(
     transaction_with_slot: TransactionWithSlot,
@@ -152,6 +223,54 @@ pub async fn process_shred_transaction(
         adapter_callback,
     )
     .await?;
+
+    Ok(())
+}
+
+/// Process one Shred transaction as a transaction-level DEX event batch.
+pub async fn process_shred_tx_events(
+    transaction_with_slot: TransactionWithSlot,
+    protocols: &[Protocol],
+    event_type_filter: Option<&EventTypeFilter>,
+    swap_cu_parse_config: Option<&SwapCuParseConfig>,
+    callback: Arc<dyn Fn(TxDexEvents) + Send + Sync>,
+    bot_wallet: Option<Pubkey>,
+    entry_index: Option<u64>,
+    tx_index_in_entry: Option<u64>,
+) -> AnyResult<()> {
+    MetricsManager::global().add_tx_process_count();
+
+    let tx = transaction_with_slot.transaction;
+    let slot = transaction_with_slot.slot;
+
+    if tx.signatures.is_empty() {
+        return Ok(());
+    }
+
+    let signature = tx.signatures[0];
+    let recv_us = transaction_with_slot.recv_us;
+    let accounts = tx.message.static_account_keys();
+
+    if let Some(tx_events) = EventParser::parse_versioned_transaction_to_events(
+        protocols,
+        event_type_filter,
+        &tx,
+        signature,
+        Some(slot),
+        None,
+        recv_us,
+        accounts,
+        &[],
+        bot_wallet,
+        None,
+        entry_index,
+        tx_index_in_entry,
+        swap_cu_parse_config,
+    )
+    .await?
+    {
+        create_tx_metrics_callback(callback)(tx_events);
+    }
 
     Ok(())
 }

@@ -1,10 +1,10 @@
 use crate::common::AnyResult;
 use crate::streaming::common::{
-    process_grpc_transaction, MetricsManager, PerformanceMetrics, StreamClientConfig,
-    SubscriptionHandle,
+    process_grpc_transaction, process_grpc_tx_events, MetricsManager, PerformanceMetrics,
+    StreamClientConfig, SubscriptionHandle,
 };
 use crate::streaming::event_parser::common::filter::EventTypeFilter;
-use crate::streaming::event_parser::{DexEvent, Protocol};
+use crate::streaming::event_parser::{DexEvent, Protocol, TxDexEvents};
 use crate::streaming::grpc::pool::factory;
 use crate::streaming::grpc::{EventPretty, SubscriptionManager};
 use anyhow::anyhow;
@@ -279,6 +279,125 @@ impl YellowstoneGrpc {
         });
 
         // 保存订阅句柄
+        let subscription_handle = SubscriptionHandle::new(stream_handle, None, metrics_handle);
+        let mut handle_guard = self.subscription_handle.lock().await;
+        *handle_guard = Some(subscription_handle);
+
+        Ok(())
+    }
+
+    /// Transaction-level event subscription.
+    ///
+    /// The callback receives all parsed DEX events for one transaction in parser order.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn subscribe_tx_events_immediate<F>(
+        &self,
+        protocols: Vec<Protocol>,
+        bot_wallet: Option<Pubkey>,
+        transaction_filter: Vec<TransactionFilter>,
+        event_type_filter: Option<EventTypeFilter>,
+        commitment: Option<CommitmentLevel>,
+        callback: F,
+    ) -> AnyResult<()>
+    where
+        F: Fn(TxDexEvents) + Send + Sync + 'static,
+    {
+        *self.event_type_filter.write().await = event_type_filter.clone();
+        if self
+            .active_subscription
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_err()
+        {
+            return Err(anyhow!("Already subscribed. Use update_subscription() to modify filters"));
+        }
+
+        let mut metrics_handle = None;
+        if self.config.enable_metrics {
+            metrics_handle = MetricsManager::global().start_auto_monitoring().await;
+        }
+
+        let transactions = self
+            .subscription_manager
+            .get_subscribe_request_filter(transaction_filter, event_type_filter.as_ref());
+        let accounts = None;
+
+        let (subscribe_tx, mut stream, subscribe_request) = self
+            .subscription_manager
+            .subscribe_with_request(transactions, accounts, commitment, event_type_filter.as_ref())
+            .await?;
+
+        let subscribe_tx = Arc::new(Mutex::new(subscribe_tx));
+        *self.current_request.write().await = Some(subscribe_request);
+        let (control_tx, mut control_rx) = mpsc::channel(100);
+        *self.control_tx.lock().await = Some(control_tx);
+
+        let callback = Arc::new(callback);
+        let swap_cu_parse_config = self.config.swap_cu_parse_config.clone();
+
+        let stream_handle = tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    message = stream.next() => {
+                        match message {
+                            Some(Ok(msg)) => {
+                                let created_at = msg.created_at;
+                                match msg.update_oneof {
+                                    Some(UpdateOneof::Transaction(sut)) => {
+                                        let transaction_pretty = factory::create_transaction_pretty_pooled(sut, created_at);
+                                        log::debug!(
+                                            "Received tx events transaction: {} at slot {}",
+                                            transaction_pretty.signature,
+                                            transaction_pretty.slot
+                                        );
+                                        if let Err(e) = process_grpc_tx_events(
+                                            EventPretty::Transaction(transaction_pretty),
+                                            &protocols,
+                                            event_type_filter.as_ref(),
+                                            swap_cu_parse_config.as_ref(),
+                                            callback.clone(),
+                                            bot_wallet,
+                                        )
+                                        .await
+                                        {
+                                            error!("Error processing tx events: {e:?}");
+                                        }
+                                    }
+                                    Some(UpdateOneof::Ping(_)) => {
+                                        if let Ok(mut tx_guard) = subscribe_tx.try_lock() {
+                                            let _ = tx_guard
+                                                .send(SubscribeRequest {
+                                                    ping: Some(SubscribeRequestPing { id: 1 }),
+                                                    ..Default::default()
+                                                })
+                                                .await;
+                                        }
+                                        log::debug!("service is ping: {}", Local::now());
+                                    }
+                                    Some(UpdateOneof::Pong(_)) => {
+                                        log::debug!("service is pong: {}", Local::now());
+                                    }
+                                    _ => {
+                                        log::debug!("Received non-transaction message in tx event subscription");
+                                    }
+                                }
+                            }
+                            Some(Err(error)) => {
+                                error!("Stream error: {error:?}");
+                                break;
+                            }
+                            None => break,
+                        }
+                    }
+                    Some(update) = control_rx.next() => {
+                        if let Err(e) = subscribe_tx.lock().await.send(update).await {
+                            error!("Failed to send subscription update: {}", e);
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+
         let subscription_handle = SubscriptionHandle::new(stream_handle, None, metrics_handle);
         let mut handle_guard = self.subscription_handle.lock().await;
         *handle_guard = Some(subscription_handle);
