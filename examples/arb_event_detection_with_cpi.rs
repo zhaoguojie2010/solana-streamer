@@ -27,7 +27,6 @@ struct InnerSwapLeg {
     event_type: EventType,
     from_mint: String,
     to_mint: String,
-    is_arb_leg: bool,
 }
 
 #[derive(Default)]
@@ -141,7 +140,7 @@ fn create_arb_callback() -> impl Fn(DexEvent) + Send + Sync + 'static {
         }
 
         println!(
-            "[INNER_SWAP] sig={} outer_ix={} inner_ix={} dex_program={} pool_id={} event_type={:?} route={} -> {} arb={}",
+            "[INNER_SWAP] sig={} outer_ix={} inner_ix={} dex_program={} pool_id={} event_type={:?} route={} -> {}",
             signature,
             metadata.outer_index,
             metadata.inner_index.unwrap_or_default(),
@@ -149,8 +148,7 @@ fn create_arb_callback() -> impl Fn(DexEvent) + Send + Sync + 'static {
             pool_id,
             metadata.event_type,
             from_mint,
-            to_mint,
-            metadata.is_arb_leg
+            to_mint
         );
 
         let leg = InnerSwapLeg {
@@ -160,7 +158,6 @@ fn create_arb_callback() -> impl Fn(DexEvent) + Send + Sync + 'static {
             event_type: metadata.event_type.clone(),
             from_mint: from_mint.clone(),
             to_mint: to_mint.clone(),
-            is_arb_leg: metadata.is_arb_leg,
         };
 
         let mut should_print_group = false;
@@ -203,13 +200,9 @@ fn create_arb_callback() -> impl Fn(DexEvent) + Send + Sync + 'static {
             .map(|x| x.to_mint.clone())
             .unwrap_or_else(|| "UNKNOWN".to_string());
         let mut unique_pools: Vec<String> = Vec::new();
-        let mut arb_leg_count = 0usize;
         for leg in group_snapshot.iter() {
             if !unique_pools.iter().any(|pool_id| pool_id == &leg.pool_id) {
                 unique_pools.push(leg.pool_id.clone());
-            }
-            if leg.is_arb_leg {
-                arb_leg_count += 1;
             }
         }
 
@@ -219,19 +212,17 @@ fn create_arb_callback() -> impl Fn(DexEvent) + Send + Sync + 'static {
         println!("outer_ix: {}", metadata.outer_index);
         println!("hops: {}", group_snapshot.len());
         println!("unique_pool_count: {}", unique_pools.len());
-        println!("arb_leg_count: {}", arb_leg_count);
         println!("group_route: {} -> {}", first_from, last_to);
         println!("legs:");
         for leg in group_snapshot.iter() {
             println!(
-                "  - inner_ix={} dex_program={} pool_id={} event_type={:?} route={} -> {} arb={}",
+                "  - inner_ix={} dex_program={} pool_id={} event_type={:?} route={} -> {}",
                 leg.inner_ix,
                 leg.dex_program,
                 leg.pool_id,
                 leg.event_type,
                 leg.from_mint,
-                leg.to_mint,
-                leg.is_arb_leg
+                leg.to_mint
             );
         }
         println!("========================\n");

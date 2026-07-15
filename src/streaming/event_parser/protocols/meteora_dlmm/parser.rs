@@ -43,12 +43,17 @@ pub fn parse_meteora_dlmm_instruction_data(
     match discriminator {
         discriminators::SWAP_IX => parse_swap_instruction(data, accounts, metadata),
         discriminators::SWAP2_IX => parse_swap2_instruction(data, accounts, metadata),
+        // SwapExactOut2 has the same account layout and emits the same Swap2 CPI event.
+        discriminators::SWAP_EXACT_OUT2_IX => parse_swap2_instruction(data, accounts, metadata),
         _ => None,
     }
 }
 
 pub fn is_meteora_dlmm_swap_instruction(discriminator: &[u8]) -> bool {
-    matches!(discriminator, discriminators::SWAP_IX | discriminators::SWAP2_IX)
+    matches!(
+        discriminator,
+        discriminators::SWAP_IX | discriminators::SWAP2_IX | discriminators::SWAP_EXACT_OUT2_IX
+    )
 }
 
 /// 解析 Meteora DLMM inner instruction data (CPI events)

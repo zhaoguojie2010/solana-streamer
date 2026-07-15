@@ -297,6 +297,7 @@ pub fn default_swap_cu_targets() -> Vec<SwapCuTarget> {
             matcher: SwapCuInstructionMatcher::Discriminator8(vec![
                 &meteora_dlmm::discriminators::SWAP_IX,
                 &meteora_dlmm::discriminators::SWAP2_IX,
+                &meteora_dlmm::discriminators::SWAP_EXACT_OUT2_IX,
             ]),
         },
         SwapCuTarget {

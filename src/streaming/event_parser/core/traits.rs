@@ -28,6 +28,8 @@ pub struct TxDexEvents {
     pub entry_index: Option<u64>,
     pub tx_index_in_entry: Option<u64>,
     pub recv_us: i64,
+    /// True when an outer custom-program instruction CPI-calls DEX swaps that form a cycle.
+    pub is_arb: bool,
     pub events: Vec<DexEvent>,
 }
 

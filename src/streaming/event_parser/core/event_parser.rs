@@ -29,14 +29,12 @@ pub struct EventParser {}
 
 #[derive(Clone, Copy)]
 struct MintLeg {
-    event_index: usize,
     from_mint: Pubkey,
     to_mint: Pubkey,
 }
 
 #[derive(Clone, Copy)]
 struct AccountLeg {
-    event_index: usize,
     from_account: Pubkey,
     to_account: Pubkey,
 }
@@ -167,6 +165,7 @@ impl EventParser {
         if events.is_empty() {
             return Ok(None);
         }
+        let is_arb = Self::is_arb_inner_swap_events(&events);
 
         Ok(Some(TxDexEvents {
             signature,
@@ -175,6 +174,7 @@ impl EventParser {
             entry_index: None,
             tx_index_in_entry: None,
             recv_us,
+            is_arb,
             events,
         }))
     }
@@ -315,6 +315,7 @@ impl EventParser {
         if events.is_empty() {
             return Ok(None);
         }
+        let is_arb = Self::is_arb_inner_swap_events(&events);
 
         Ok(Some(TxDexEvents {
             signature,
@@ -323,6 +324,7 @@ impl EventParser {
             entry_index,
             tx_index_in_entry,
             recv_us,
+            is_arb,
             events,
         }))
     }
@@ -470,7 +472,6 @@ impl EventParser {
                             }
                         }
 
-                        Self::mark_arb_inner_swap_events(&mut inner_events);
                         for inner_event in inner_events.iter() {
                             callback(inner_event);
                         }
@@ -978,69 +979,42 @@ impl EventParser {
         }
     }
 
-    fn mark_arb_segment(events: &mut [DexEvent], legs: &[MintLeg]) {
-        if legs.len() < 2 {
-            return;
-        }
-        let Some(first_leg) = legs.first() else {
-            return;
-        };
-        let Some(last_leg) = legs.last() else {
-            return;
-        };
-        if first_leg.from_mint != last_leg.to_mint {
-            return;
-        }
-
-        for leg in legs.iter() {
-            events[leg.event_index].metadata_mut().is_arb_leg = true;
-        }
-    }
-
-    fn mark_arb_account_segment(events: &mut [DexEvent], legs: &[AccountLeg]) {
-        if legs.len() < 2 {
-            return;
-        }
-        let Some(first_leg) = legs.first() else {
-            return;
-        };
-        let Some(last_leg) = legs.last() else {
-            return;
-        };
-        if first_leg.from_account != last_leg.to_account {
-            return;
-        }
-
-        for leg in legs.iter() {
-            events[leg.event_index].metadata_mut().is_arb_leg = true;
-        }
-    }
-
     #[inline]
-    fn mark_arb_inner_swap_events(events: &mut [DexEvent]) {
+    fn is_arb_inner_swap_events(events: &[DexEvent]) -> bool {
         let mut account_legs: Vec<AccountLeg> = Vec::new();
         let mut mint_legs: Vec<MintLeg> = Vec::new();
-        for event_index in 0..events.len() {
-            let (is_inner, swap_accounts, swap_mints) = {
-                let event = &events[event_index];
-                let metadata = event.metadata();
-                (
-                    metadata.inner_index.is_some(),
-                    Self::extract_swap_token_accounts(event),
-                    Self::extract_swap_mints(event),
-                )
-            };
+        let mut outer_index = None;
 
-            if !is_inner {
+        for event in events {
+            let metadata = event.metadata();
+            if outer_index != Some(metadata.outer_index) {
+                if Self::is_arb_account_segment(&account_legs)
+                    || Self::is_arb_mint_segment(&mint_legs)
+                {
+                    return true;
+                }
+                account_legs.clear();
+                mint_legs.clear();
+                outer_index = Some(metadata.outer_index);
+            }
+
+            if metadata.inner_index.is_none() {
                 continue;
             }
 
-            if let Some((from_account, to_account)) = swap_accounts {
-                let next_leg = AccountLeg { event_index, from_account, to_account };
+            if let Some((from_account, to_account)) = Self::extract_swap_token_accounts(event) {
+                if Self::is_arb_mint_segment(&mint_legs) {
+                    return true;
+                }
+                mint_legs.clear();
+
+                let next_leg = AccountLeg { from_account, to_account };
 
                 if let Some(last_leg) = account_legs.last() {
                     if last_leg.to_account != next_leg.from_account {
-                        Self::mark_arb_account_segment(events, &account_legs);
+                        if Self::is_arb_account_segment(&account_legs) {
+                            return true;
+                        }
                         account_legs.clear();
                     }
                 }
@@ -1048,28 +1022,51 @@ impl EventParser {
                 continue;
             }
 
-            Self::mark_arb_account_segment(events, &account_legs);
+            if Self::is_arb_account_segment(&account_legs) {
+                return true;
+            }
             account_legs.clear();
 
-            let Some((from_mint, to_mint)) = swap_mints else {
-                Self::mark_arb_segment(events, &mint_legs);
+            let Some((from_mint, to_mint)) = Self::extract_swap_mints(event) else {
+                if Self::is_arb_mint_segment(&mint_legs) {
+                    return true;
+                }
                 mint_legs.clear();
                 continue;
             };
 
-            let next_leg = MintLeg { event_index, from_mint, to_mint };
+            let next_leg = MintLeg { from_mint, to_mint };
 
             if let Some(last_leg) = mint_legs.last() {
                 if last_leg.to_mint != next_leg.from_mint {
-                    Self::mark_arb_segment(events, &mint_legs);
+                    if Self::is_arb_mint_segment(&mint_legs) {
+                        return true;
+                    }
                     mint_legs.clear();
                 }
             }
             mint_legs.push(next_leg);
         }
 
-        Self::mark_arb_account_segment(events, &account_legs);
-        Self::mark_arb_segment(events, &mint_legs);
+        Self::is_arb_account_segment(&account_legs) || Self::is_arb_mint_segment(&mint_legs)
+    }
+
+    #[inline]
+    fn is_arb_mint_segment(legs: &[MintLeg]) -> bool {
+        legs.len() >= 2
+            && legs
+                .first()
+                .zip(legs.last())
+                .is_some_and(|(first, last)| first.from_mint == last.to_mint)
+    }
+
+    #[inline]
+    fn is_arb_account_segment(legs: &[AccountLeg]) -> bool {
+        legs.len() >= 2
+            && legs
+                .first()
+                .zip(legs.last())
+                .is_some_and(|(first, last)| first.from_account == last.to_account)
     }
 
     fn instruction_needs_program_data(protocol: &Protocol, data: &[u8]) -> bool {
