@@ -66,7 +66,10 @@ pub fn pump_swap_buy_event_log_decode(data: &[u8]) -> Option<PumpSwapBuyEvent> {
     if data.len() < PUMP_SWAP_BUY_EVENT_LOG_SIZE {
         return None;
     }
-    borsh::from_slice::<PumpSwapBuyEvent>(data).ok()
+    // PumpSwap 会在事件尾部追加新字段；只解析当前 SDK 已知的前缀以保持向前兼容。
+    // `borsh::from_slice` 要求消费全部输入，遇到这些尾部字段会返回 Not all bytes read。
+    let mut known_fields = data;
+    <PumpSwapBuyEvent as BorshDeserialize>::deserialize(&mut known_fields).ok()
 }
 
 /// 精确报价买入事件（BuyExactQuoteIn）
