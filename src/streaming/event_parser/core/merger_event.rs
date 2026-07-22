@@ -149,6 +149,11 @@ pub fn merge(instruction_event: &mut DexEvent, cpi_log_event: DexEvent) {
                 e.ix_name = cpie.ix_name.clone();
                 e.cashback_fee_basis_points = cpie.cashback_fee_basis_points;
                 e.cashback = cpie.cashback;
+                e.buyback_fee_basis_points = cpie.buyback_fee_basis_points;
+                e.buyback_fee = cpie.buyback_fee;
+                e.virtual_quote_reserves = cpie.virtual_quote_reserves;
+                e.can_boost = cpie.can_boost;
+                e.base_supply = cpie.base_supply;
             }
             _ => {}
         },
@@ -179,6 +184,11 @@ pub fn merge(instruction_event: &mut DexEvent, cpi_log_event: DexEvent) {
                 e.coin_creator_fee = cpie.coin_creator_fee;
                 e.cashback_fee_basis_points = cpie.cashback_fee_basis_points;
                 e.cashback = cpie.cashback;
+                e.buyback_fee_basis_points = cpie.buyback_fee_basis_points;
+                e.buyback_fee = cpie.buyback_fee;
+                e.virtual_quote_reserves = cpie.virtual_quote_reserves;
+                e.can_boost = cpie.can_boost;
+                e.base_supply = cpie.base_supply;
                 e.track_volume = cpie.track_volume;
                 e.total_unclaimed_tokens = cpie.total_unclaimed_tokens;
                 e.total_claimed_tokens = cpie.total_claimed_tokens;
@@ -214,6 +224,11 @@ pub fn merge(instruction_event: &mut DexEvent, cpi_log_event: DexEvent) {
                 e.coin_creator_fee = cpie.coin_creator_fee;
                 e.cashback_fee_basis_points = cpie.cashback_fee_basis_points;
                 e.cashback = cpie.cashback;
+                e.buyback_fee_basis_points = cpie.buyback_fee_basis_points;
+                e.buyback_fee = cpie.buyback_fee;
+                e.virtual_quote_reserves = cpie.virtual_quote_reserves;
+                e.can_boost = cpie.can_boost;
+                e.base_supply = cpie.base_supply;
             }
             _ => {}
         },

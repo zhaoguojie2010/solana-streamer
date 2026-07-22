@@ -43,6 +43,16 @@ pub struct PumpSwapBuyEvent {
     pub cashback_fee_basis_points: u64,
     pub cashback: u64,
     #[borsh(skip)]
+    pub buyback_fee_basis_points: u64,
+    #[borsh(skip)]
+    pub buyback_fee: u64,
+    #[borsh(skip)]
+    pub virtual_quote_reserves: i128,
+    #[borsh(skip)]
+    pub can_boost: bool,
+    #[borsh(skip)]
+    pub base_supply: u64,
+    #[borsh(skip)]
     pub base_mint: Pubkey,
     #[borsh(skip)]
     pub quote_mint: Pubkey,
@@ -68,8 +78,17 @@ pub fn pump_swap_buy_event_log_decode(data: &[u8]) -> Option<PumpSwapBuyEvent> {
     }
     // PumpSwap 会在事件尾部追加新字段；只解析当前 SDK 已知的前缀以保持向前兼容。
     // `borsh::from_slice` 要求消费全部输入，遇到这些尾部字段会返回 Not all bytes read。
-    let mut known_fields = data;
-    <PumpSwapBuyEvent as BorshDeserialize>::deserialize(&mut known_fields).ok()
+    let mut remaining = data;
+    let mut event = <PumpSwapBuyEvent as BorshDeserialize>::deserialize(&mut remaining).ok()?;
+    decode_swap_event_tail(
+        remaining,
+        &mut event.buyback_fee_basis_points,
+        &mut event.buyback_fee,
+        &mut event.virtual_quote_reserves,
+        &mut event.can_boost,
+        &mut event.base_supply,
+    );
+    Some(event)
 }
 
 /// 精确报价买入事件（BuyExactQuoteIn）
@@ -107,6 +126,11 @@ pub struct PumpSwapBuyExactQuoteInEvent {
     pub coin_creator_fee: u64,
     pub cashback_fee_basis_points: u64,
     pub cashback: u64,
+    pub buyback_fee_basis_points: u64,
+    pub buyback_fee: u64,
+    pub virtual_quote_reserves: i128,
+    pub can_boost: bool,
+    pub base_supply: u64,
     pub track_volume: bool,
     pub total_unclaimed_tokens: u64,
     pub total_claimed_tokens: u64,
@@ -153,6 +177,16 @@ pub struct PumpSwapSellEvent {
     pub cashback_fee_basis_points: u64,
     pub cashback: u64,
     #[borsh(skip)]
+    pub buyback_fee_basis_points: u64,
+    #[borsh(skip)]
+    pub buyback_fee: u64,
+    #[borsh(skip)]
+    pub virtual_quote_reserves: i128,
+    #[borsh(skip)]
+    pub can_boost: bool,
+    #[borsh(skip)]
+    pub base_supply: u64,
+    #[borsh(skip)]
     pub base_mint: Pubkey,
     #[borsh(skip)]
     pub quote_mint: Pubkey,
@@ -176,7 +210,54 @@ pub fn pump_swap_sell_event_log_decode(data: &[u8]) -> Option<PumpSwapSellEvent>
     if data.len() < PUMP_SWAP_SELL_EVENT_LOG_SIZE {
         return None;
     }
-    borsh::from_slice::<PumpSwapSellEvent>(&data[..PUMP_SWAP_SELL_EVENT_LOG_SIZE]).ok()
+    let mut remaining = data;
+    let mut event = <PumpSwapSellEvent as BorshDeserialize>::deserialize(&mut remaining).ok()?;
+    decode_swap_event_tail(
+        remaining,
+        &mut event.buyback_fee_basis_points,
+        &mut event.buyback_fee,
+        &mut event.virtual_quote_reserves,
+        &mut event.can_boost,
+        &mut event.base_supply,
+    );
+    Some(event)
+}
+
+/// PumpSwap 在 Buy/Sell 事件尾部追加 Boost 字段；按可用前缀解析以兼容历史事件。
+fn decode_swap_event_tail(
+    mut data: &[u8],
+    buyback_fee_basis_points: &mut u64,
+    buyback_fee: &mut u64,
+    virtual_quote_reserves: &mut i128,
+    can_boost: &mut bool,
+    base_supply: &mut u64,
+) {
+    if data.len() < 16 {
+        return;
+    }
+    let mut u64_bytes = [0u8; 8];
+    u64_bytes.copy_from_slice(&data[..8]);
+    *buyback_fee_basis_points = u64::from_le_bytes(u64_bytes);
+    u64_bytes.copy_from_slice(&data[8..16]);
+    *buyback_fee = u64::from_le_bytes(u64_bytes);
+    data = &data[16..];
+
+    if data.len() < 16 {
+        return;
+    }
+    let mut i128_bytes = [0u8; 16];
+    i128_bytes.copy_from_slice(&data[..16]);
+    *virtual_quote_reserves = i128::from_le_bytes(i128_bytes);
+    data = &data[16..];
+
+    let Some((&boost_flag, rest)) = data.split_first() else {
+        return;
+    };
+    *can_boost = boost_flag != 0;
+    if rest.len() >= 8 {
+        u64_bytes.copy_from_slice(&rest[..8]);
+        *base_supply = u64::from_le_bytes(u64_bytes);
+    }
 }
 
 /// 创建池子事件

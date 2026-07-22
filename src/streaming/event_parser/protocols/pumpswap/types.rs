@@ -76,6 +76,8 @@ pub struct Pool {
     pub coin_creator: Pubkey,
     pub is_mayhem_mode: bool,
     pub is_cashback_coin: bool,
+    #[borsh(skip)]
+    pub virtual_quote_reserves: i128,
 }
 
 pub const POOL_SIZE: usize = 1 + 2 + 32 * 6 + 8 + 32 + 1 + 1;
@@ -84,7 +86,12 @@ pub fn pool_decode(data: &[u8]) -> Option<Pool> {
     if data.len() < POOL_SIZE {
         return None;
     }
-    borsh::from_slice::<Pool>(&data[..POOL_SIZE]).ok()
+    let mut pool = borsh::from_slice::<Pool>(&data[..POOL_SIZE]).ok()?;
+    if data.len() >= POOL_SIZE + 16 {
+        pool.virtual_quote_reserves =
+            i128::from_le_bytes(data[POOL_SIZE..POOL_SIZE + 16].try_into().ok()?);
+    }
+    Some(pool)
 }
 
 pub fn pool_parser(account: AccountPretty, mut metadata: EventMetadata) -> Option<DexEvent> {
@@ -93,7 +100,7 @@ pub fn pool_parser(account: AccountPretty, mut metadata: EventMetadata) -> Optio
     if account.data.len() < POOL_SIZE + 8 {
         return None;
     }
-    if let Some(pool) = pool_decode(&account.data[8..POOL_SIZE + 8]) {
+    if let Some(pool) = pool_decode(&account.data[8..]) {
         Some(DexEvent::PumpSwapPoolAccountEvent(PumpSwapPoolAccountEvent {
             metadata,
             pubkey: account.pubkey,
