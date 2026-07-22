@@ -25,6 +25,18 @@ use solana_transaction_status::InnerInstructions;
 use std::sync::Arc;
 use yellowstone_grpc_proto::geyser::SubscribeUpdateTransactionInfo;
 
+const SYSTEM_PROGRAM_ID: Pubkey = solana_sdk::pubkey!("11111111111111111111111111111111");
+const JITO_TIP_ACCOUNTS: &[Pubkey] = &[
+    solana_sdk::pubkey!("96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5"),
+    solana_sdk::pubkey!("HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe"),
+    solana_sdk::pubkey!("Cw8CFyM9FkoMi7K7Crf6HNQqf4uEMzpKw6QNghXLvLkY"),
+    solana_sdk::pubkey!("ADaUMid9yfUytqMBgopwjb2DTLSokTSzL1zt6iGPaS49"),
+    solana_sdk::pubkey!("DfXygSm4jCyNCybVYYK6DwvWqjKee8pbDmJGcLWNDXjh"),
+    solana_sdk::pubkey!("ADuUkR4vqLUMWXxW9gh6D6L8pMSawimctcNZ5pGwDcEt"),
+    solana_sdk::pubkey!("DttWaMuVvTiduZRnguLF7jNxTgiMBZ1hyAumKUiL2KRL"),
+    solana_sdk::pubkey!("3AVi9Tg9Uo68tJfuvoKvqKNWKkC5wPdSSdeBnizKZ6jT"),
+];
+
 pub struct EventParser {}
 
 #[derive(Clone, Copy)]
@@ -40,6 +52,37 @@ struct AccountLeg {
 }
 
 impl EventParser {
+    fn summarize_compute_budget(events: &[DexEvent]) -> (u64, Option<u32>, bool) {
+        let mut price = 0;
+        let mut limit = None;
+        let mut price_set = false;
+        for event in events {
+            match event {
+                DexEvent::SetComputeUnitPriceEvent(event) => {
+                    price = event.micro_lamports;
+                    price_set = true;
+                }
+                DexEvent::SetComputeUnitLimitEvent(event) => limit = Some(event.units),
+                _ => {}
+            }
+        }
+        (price, limit, price_set)
+    }
+
+    fn is_system_transfer_to_jito(
+        program_id_index: usize,
+        account_indices: &[u8],
+        data: &[u8],
+        accounts: &[Pubkey],
+    ) -> bool {
+        accounts.get(program_id_index) == Some(&SYSTEM_PROGRAM_ID)
+            && data.get(..4) == Some(2u32.to_le_bytes().as_slice())
+            && account_indices
+                .get(1)
+                .and_then(|index| accounts.get(*index as usize))
+                .is_some_and(|account| JITO_TIP_ACCOUNTS.contains(account))
+    }
+
     // ================================================================================================
     // Public API - Entry Points
     // ================================================================================================
@@ -140,6 +183,7 @@ impl EventParser {
         transaction_index: Option<u64>,
         swap_cu_parse_config: Option<&SwapCuParseConfig>,
     ) -> anyhow::Result<Option<TxDexEvents>> {
+        let has_jito_tip = Self::grpc_transaction_has_jito_tip(&grpc_tx);
         let events = Arc::new(Mutex::new(Vec::new()));
         let collected = events.clone();
         let callback = Arc::new(move |event: DexEvent| {
@@ -166,6 +210,8 @@ impl EventParser {
             return Ok(None);
         }
         let is_arb = Self::is_arb_inner_swap_events(&events);
+        let (compute_unit_price_micro_lamports, compute_unit_limit, compute_unit_price_set) =
+            Self::summarize_compute_budget(&events);
 
         Ok(Some(TxDexEvents {
             signature,
@@ -175,6 +221,10 @@ impl EventParser {
             tx_index_in_entry: None,
             recv_us,
             is_arb,
+            compute_unit_price_micro_lamports,
+            compute_unit_limit,
+            compute_unit_price_set,
+            has_jito_tip,
             events,
         }))
     }
@@ -288,6 +338,8 @@ impl EventParser {
         tx_index_in_entry: Option<u64>,
         swap_cu_parse_config: Option<&SwapCuParseConfig>,
     ) -> anyhow::Result<Option<TxDexEvents>> {
+        let has_jito_tip =
+            Self::versioned_transaction_has_jito_tip(transaction, accounts, inner_instructions);
         let events = Arc::new(Mutex::new(Vec::new()));
         let collected = events.clone();
         let callback = Arc::new(move |event: DexEvent| {
@@ -316,6 +368,8 @@ impl EventParser {
             return Ok(None);
         }
         let is_arb = Self::is_arb_inner_swap_events(&events);
+        let (compute_unit_price_micro_lamports, compute_unit_limit, compute_unit_price_set) =
+            Self::summarize_compute_budget(&events);
 
         Ok(Some(TxDexEvents {
             signature,
@@ -325,8 +379,83 @@ impl EventParser {
             tx_index_in_entry,
             recv_us,
             is_arb,
+            compute_unit_price_micro_lamports,
+            compute_unit_limit,
+            compute_unit_price_set,
+            has_jito_tip,
             events,
         }))
+    }
+
+    fn grpc_transaction_has_jito_tip(grpc_tx: &SubscribeUpdateTransactionInfo) -> bool {
+        let Some(transaction) = grpc_tx.transaction.as_ref() else {
+            return false;
+        };
+        let Some(message) = transaction.message.as_ref() else {
+            return false;
+        };
+        let mut accounts = message
+            .account_keys
+            .iter()
+            .filter_map(|account| Pubkey::try_from(account.as_slice()).ok())
+            .collect::<Vec<_>>();
+        if let Some(meta) = grpc_tx.meta.as_ref() {
+            accounts.extend(
+                meta.loaded_writable_addresses
+                    .iter()
+                    .chain(meta.loaded_readonly_addresses.iter())
+                    .filter_map(|account| Pubkey::try_from(account.as_slice()).ok()),
+            );
+        }
+        if message.instructions.iter().any(|instruction| {
+            Self::is_system_transfer_to_jito(
+                instruction.program_id_index as usize,
+                &instruction.accounts,
+                &instruction.data,
+                &accounts,
+            )
+        }) {
+            return true;
+        }
+        grpc_tx.meta.as_ref().is_some_and(|meta| {
+            meta.inner_instructions.iter().any(|group| {
+                group.instructions.iter().any(|instruction| {
+                    Self::is_system_transfer_to_jito(
+                        instruction.program_id_index as usize,
+                        &instruction.accounts,
+                        &instruction.data,
+                        &accounts,
+                    )
+                })
+            })
+        })
+    }
+
+    fn versioned_transaction_has_jito_tip(
+        transaction: &VersionedTransaction,
+        accounts: &[Pubkey],
+        inner_instructions: &[InnerInstructions],
+    ) -> bool {
+        if transaction.message.instructions().iter().any(|instruction| {
+            Self::is_system_transfer_to_jito(
+                instruction.program_id_index as usize,
+                &instruction.accounts,
+                &instruction.data,
+                accounts,
+            )
+        }) {
+            return true;
+        }
+        inner_instructions.iter().any(|group| {
+            group.instructions.iter().any(|instruction| {
+                Self::is_system_transfer_to_jito(
+                    instruction.instruction.program_id_index as usize,
+                    &instruction.instruction.accounts,
+                    &instruction.instruction.data,
+                    accounts,
+                )
+            })
+        })
     }
 
     // ================================================================================================

@@ -30,6 +30,18 @@ pub struct TxDexEvents {
     pub recv_us: i64,
     /// True when an outer custom-program instruction CPI-calls DEX swaps that form a cycle.
     pub is_arb: bool,
+    /// Effective transaction CU price in micro-lamports/CU; zero when not set.
+    #[serde(default)]
+    pub compute_unit_price_micro_lamports: u64,
+    /// Explicit transaction CU limit, when present.
+    #[serde(default)]
+    pub compute_unit_limit: Option<u32>,
+    /// Distinguishes an absent CU price instruction from an explicit zero price.
+    #[serde(default)]
+    pub compute_unit_price_set: bool,
+    /// True only when a System Program transfer pays a known Jito tip account.
+    #[serde(default)]
+    pub has_jito_tip: bool,
     pub events: Vec<DexEvent>,
 }
 
