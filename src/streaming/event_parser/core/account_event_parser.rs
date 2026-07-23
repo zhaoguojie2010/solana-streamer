@@ -74,6 +74,8 @@ impl AccountEventParser {
                     // 构建临时元数据（protocol会被dispatcher设置，event_type会在parser中设置）
                     let metadata = EventMetadata {
                         slot: account.slot,
+                        account_write_version: Some(account.write_version),
+                        is_startup: account.is_startup,
                         signature: account.signature,
                         protocol: ProtocolType::Common, // 会被 EventDispatcher::dispatch_account 设置
                         event_type: EventType::default(), // 会被具体 parser 设置
@@ -110,6 +112,8 @@ impl AccountEventParser {
         // 这些是通用的，不属于特定协议
         let metadata = EventMetadata {
             slot: account.slot,
+            account_write_version: Some(account.write_version),
+            is_startup: account.is_startup,
             signature: account.signature,
             protocol: ProtocolType::Common,
             event_type: EventType::default(),

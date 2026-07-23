@@ -374,6 +374,10 @@ pub struct SwapData {
 pub struct EventMetadata {
     pub signature: Signature,
     pub slot: u64,
+    #[serde(default)]
+    pub account_write_version: Option<u64>,
+    #[serde(default)]
+    pub is_startup: bool,
     pub transaction_index: Option<u64>, // 新增：交易在slot中的索引
     pub block_time: i64,
     pub block_time_ms: i64,
@@ -407,6 +411,8 @@ impl EventMetadata {
         Self {
             signature,
             slot,
+            account_write_version: None,
+            is_startup: false,
             block_time,
             block_time_ms,
             recv_us,

@@ -21,6 +21,8 @@ pub enum EventPretty {
 #[derive(Clone, Default)]
 pub struct AccountPretty {
     pub slot: u64,
+    pub write_version: u64,
+    pub is_startup: bool,
     pub signature: Signature,
     pub pubkey: Pubkey,
     pub executable: bool,
@@ -35,6 +37,8 @@ impl fmt::Debug for AccountPretty {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("AccountPretty")
             .field("slot", &self.slot)
+            .field("write_version", &self.write_version)
+            .field("is_startup", &self.is_startup)
             .field("signature", &self.signature)
             .field("pubkey", &self.pubkey)
             .field("executable", &self.executable)

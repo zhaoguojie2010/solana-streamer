@@ -94,9 +94,12 @@ pub struct PooledAccountPretty {
 impl PooledAccountPretty {
     /// 从 gRPC 更新重置数据
     pub fn reset_from_update(&mut self, account_update: SubscribeUpdateAccount) {
+        let is_startup = account_update.is_startup;
         let account_info = account_update.account.unwrap();
 
         self.account.slot = account_update.slot;
+        self.account.write_version = account_info.write_version;
+        self.account.is_startup = is_startup;
         self.account.signature = if let Some(txn_signature) = account_info.txn_signature {
             Signature::try_from(txn_signature.as_slice()).expect("valid signature")
         } else {
