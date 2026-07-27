@@ -39,6 +39,7 @@ anyhow = "1.0.90"
 yellowstone-grpc-client = {  version = "9.0.0" }
 yellowstone-grpc-proto = {  version = "9.0.0" }
 tokio = { version = "1.42.0", features = ["full", "rt-multi-thread"]}
+socket2 = "0.6"
 tonic = { version = "0.14.2", features = ["transport"] }
 rustls = { version = "0.23.23", features = ["ring"], default-features = false }
 rustls-native-certs = "0.8.1"
