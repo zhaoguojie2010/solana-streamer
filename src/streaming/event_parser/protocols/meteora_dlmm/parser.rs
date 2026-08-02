@@ -43,8 +43,9 @@ pub fn parse_meteora_dlmm_instruction_data(
     match discriminator {
         discriminators::SWAP_IX => parse_swap_instruction(data, accounts, metadata),
         discriminators::SWAP2_IX => parse_swap2_instruction(data, accounts, metadata),
-        // SwapExactOut2 has the same account layout and emits the same Swap2 CPI event.
-        discriminators::SWAP_EXACT_OUT2_IX => parse_swap2_instruction(data, accounts, metadata),
+        discriminators::SWAP_EXACT_OUT2_IX => {
+            parse_swap_exact_out2_instruction(data, accounts, metadata)
+        }
         _ => None,
     }
 }
@@ -156,6 +157,47 @@ fn parse_swap2_instruction(
         metadata,
         amount_in,
         min_amount_out,
+        swap_mode: super::events::MeteoraDlmmSwapMode::ExactIn,
+        lb_pair: parsed_accounts.lb_pair,
+        bin_array_bitmap_extension: parsed_accounts.bin_array_bitmap_extension,
+        reserve_x: parsed_accounts.reserve_x,
+        reserve_y: parsed_accounts.reserve_y,
+        user_token_in: parsed_accounts.user_token_in,
+        user_token_out: parsed_accounts.user_token_out,
+        token_x_mint: parsed_accounts.token_x_mint,
+        token_y_mint: parsed_accounts.token_y_mint,
+        oracle: parsed_accounts.oracle,
+        host_fee_in: parsed_accounts.host_fee_in,
+        user: parsed_accounts.user,
+        token_x_program: parsed_accounts.token_x_program,
+        token_y_program: parsed_accounts.token_y_program,
+        memo_program: parsed_accounts.memo_program.unwrap_or_default(),
+        event_authority: parsed_accounts.event_authority,
+        program: parsed_accounts.program,
+        remaining_accounts: parsed_accounts.remaining_accounts,
+        ..Default::default()
+    }))
+}
+
+fn parse_swap_exact_out2_instruction(
+    data: &[u8],
+    accounts: &[Pubkey],
+    mut metadata: EventMetadata,
+) -> Option<DexEvent> {
+    metadata.event_type = EventType::MeteoraDlmmSwap2;
+    if data.len() < 16 {
+        return None;
+    }
+
+    let max_amount_in = read_u64_le(data, 0)?;
+    let amount_out = read_u64_le(data, 8)?;
+    let parsed_accounts = parse_swap_accounts(accounts, true)?;
+
+    Some(DexEvent::MeteoraDlmmSwap2Event(MeteoraDlmmSwap2Event {
+        metadata,
+        max_amount_in,
+        amount_out,
+        swap_mode: super::events::MeteoraDlmmSwapMode::ExactOut,
         lb_pair: parsed_accounts.lb_pair,
         bin_array_bitmap_extension: parsed_accounts.bin_array_bitmap_extension,
         reserve_x: parsed_accounts.reserve_x,

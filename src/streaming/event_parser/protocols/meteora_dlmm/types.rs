@@ -28,7 +28,9 @@ pub struct StaticParameters {
     pub max_bin_id: i32,
     pub protocol_share: u16,
     pub base_fee_power_factor: u8,
-    pub padding: [u8; 5],
+    pub function_type: u8,
+    pub collect_fee_mode: u8,
+    pub padding: [u8; 3],
 }
 
 #[repr(C)]
@@ -97,7 +99,8 @@ pub struct LbPair {
     pub creator: Pubkey,
     pub token_mint_x_program_flag: u8,
     pub token_mint_y_program_flag: u8,
-    pub reserved: [u8; 22],
+    pub version: u8,
+    pub reserved: [u8; 21],
 }
 
 #[repr(C)]
@@ -120,16 +123,20 @@ pub struct Bin {
     pub price: u128,
     /// Bin 的流动性供应量（与 LP mint supply 相同）
     pub liquidity_supply: u128,
-    /// 每个代币存储的奖励（reward_a_per_token_stored）
-    pub reward_per_token_stored: [u128; 2],
+    pub fulfilled_order_amount_x: u64,
+    pub fulfilled_order_amount_y: u64,
+    pub limit_order_fee_ask_side: u64,
+    pub limit_order_fee_bid_side: u64,
     /// 每个流动性存入的 Token X 的交换费用金额
     pub fee_amount_x_per_token_stored: u128,
     /// 每个流动性存入的 Token Y 的交换费用金额
     pub fee_amount_y_per_token_stored: u128,
-    /// 交换到 bin 的总 Token X 数量（仅用于跟踪）
-    pub amount_x_in: u128,
-    /// 交换到 bin 的总 Token Y 数量（仅用于跟踪）
-    pub amount_y_in: u128,
+    pub open_order_amount: u64,
+    pub total_processing_order_amount: u64,
+    pub processed_order_remaining_amount: u64,
+    pub order_age: u32,
+    pub limit_order_ask_side: u8,
+    pub padding: [u8; 3],
 }
 
 /// BinArray 结构体 - 包含一个范围内的 bin
@@ -285,14 +292,20 @@ pub fn bin_array_decode(data: &[u8]) -> Option<BinArray> {
             amount_y: u64::from_le_bytes(bin_data[8..16].try_into().ok()?),
             price: u128::from_le_bytes(bin_data[16..32].try_into().ok()?),
             liquidity_supply: u128::from_le_bytes(bin_data[32..48].try_into().ok()?),
-            reward_per_token_stored: [
-                u128::from_le_bytes(bin_data[48..64].try_into().ok()?),
-                u128::from_le_bytes(bin_data[64..80].try_into().ok()?),
-            ],
+            fulfilled_order_amount_x: u64::from_le_bytes(bin_data[48..56].try_into().ok()?),
+            fulfilled_order_amount_y: u64::from_le_bytes(bin_data[56..64].try_into().ok()?),
+            limit_order_fee_ask_side: u64::from_le_bytes(bin_data[64..72].try_into().ok()?),
+            limit_order_fee_bid_side: u64::from_le_bytes(bin_data[72..80].try_into().ok()?),
             fee_amount_x_per_token_stored: u128::from_le_bytes(bin_data[80..96].try_into().ok()?),
             fee_amount_y_per_token_stored: u128::from_le_bytes(bin_data[96..112].try_into().ok()?),
-            amount_x_in: u128::from_le_bytes(bin_data[112..128].try_into().ok()?),
-            amount_y_in: u128::from_le_bytes(bin_data[128..144].try_into().ok()?),
+            open_order_amount: u64::from_le_bytes(bin_data[112..120].try_into().ok()?),
+            total_processing_order_amount: u64::from_le_bytes(bin_data[120..128].try_into().ok()?),
+            processed_order_remaining_amount: u64::from_le_bytes(
+                bin_data[128..136].try_into().ok()?,
+            ),
+            order_age: u32::from_le_bytes(bin_data[136..140].try_into().ok()?),
+            limit_order_ask_side: bin_data[140],
+            padding: bin_data[141..144].try_into().ok()?,
         };
     }
 

@@ -101,7 +101,9 @@ pub struct PoolState {
     pub swap_in_amount_token1: u128,
     pub swap_out_amount_token0: u128,
     pub status: u8,
-    pub padding: [u8; 7],
+    /// Fee collection mode: 0 = input token, 1 = token0, 2 = token1.
+    pub fee_on: u8,
+    pub padding: [u8; 6],
     pub reward_infos: [RewardInfo; 3],
     pub tick_array_bitmap: [u64; 16],
     pub total_fees_token0: u64,

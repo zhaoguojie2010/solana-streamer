@@ -102,17 +102,19 @@ fn parse_swap2_instruction(
 ) -> Option<DexEvent> {
     metadata.event_type = EventType::MeteoraDammV2Swap2;
 
-    if data.len() < 16 || accounts.len() < 13 {
+    if data.len() < 17 || accounts.len() < 14 {
         return None;
     }
 
     // 跳过 discriminator (8 bytes)
-    let amount_0 = u64::from_le_bytes(data[0..8].try_into().unwrap());
-    let amount_1 = u64::from_le_bytes(data[8..16].try_into().unwrap());
+    let amount_0 = u64::from_le_bytes(data[0..8].try_into().ok()?);
+    let amount_1 = u64::from_le_bytes(data[8..16].try_into().ok()?);
     let swap_mode = data[16];
 
-    // swap2 可能有 15 个账户(带 referral)或 14 个账户
-    let has_referral = accounts.len() >= 15;
+    // SwapCtx always has 14 fixed accounts. Anchor represents an absent
+    // optional referral with the DAMM v2 program ID at position 11; any
+    // instruction sysvar used by the rate limiter is a remaining account.
+    let has_referral = accounts[11] != METEORA_DAMM_V2_PROGRAM_ID;
 
     Some(DexEvent::MeteoraDammV2Swap2Event(MeteoraDammV2Swap2Event {
         metadata,
@@ -127,14 +129,10 @@ fn parse_swap2_instruction(
         payer: accounts[8],
         token_a_program: accounts[9],
         token_b_program: accounts[10],
-        referral_token_account: if has_referral && accounts.len() > 11 {
-            Some(accounts[11])
-        } else {
-            None
-        },
-        event_authority: accounts[if has_referral { 12 } else { 11 }],
-        program: accounts[if has_referral { 13 } else { 12 }],
-        sysvar: accounts[if has_referral { 14 } else { 13 }],
+        referral_token_account: has_referral.then_some(accounts[11]),
+        event_authority: accounts[12],
+        program: accounts[13],
+        sysvar: accounts.get(14).copied().unwrap_or_default(),
         amount_0,
         amount_1,
         swap_mode,

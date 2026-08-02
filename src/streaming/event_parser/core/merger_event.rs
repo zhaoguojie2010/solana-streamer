@@ -375,6 +375,7 @@ pub fn merge(instruction_event: &mut DexEvent, cpi_log_event: DexEvent) {
                 e.output_amount = cpie.output_amount;
                 e.next_sqrt_price = cpie.next_sqrt_price;
                 e.trading_fee = cpie.trading_fee;
+                e.protocol_fee = cpie.protocol_fee;
                 e.partner_fee = cpie.partner_fee;
                 e.referral_fee = cpie.referral_fee;
                 e.included_transfer_fee_amount_in = cpie.included_transfer_fee_amount_in;
@@ -401,6 +402,7 @@ pub fn merge(instruction_event: &mut DexEvent, cpi_log_event: DexEvent) {
                 e.output_amount = cpie.output_amount;
                 e.next_sqrt_price = cpie.next_sqrt_price;
                 e.trading_fee = cpie.trading_fee;
+                e.protocol_fee = cpie.protocol_fee;
                 e.partner_fee = cpie.partner_fee;
                 e.referral_fee = cpie.referral_fee;
                 e.included_transfer_fee_amount_in = cpie.included_transfer_fee_amount_in;

@@ -6,6 +6,13 @@ use borsh::BorshDeserialize;
 use serde::{Deserialize, Serialize};
 use solana_sdk::pubkey::Pubkey;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MeteoraDlmmSwapMode {
+    #[default]
+    ExactIn,
+    ExactOut,
+}
+
 /// Meteora DLMM Swap event
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MeteoraDlmmSwapEvent {
@@ -69,6 +76,12 @@ pub struct MeteoraDlmmSwap2Event {
     // Instruction params
     pub amount_in: u64,
     pub min_amount_out: u64,
+    #[serde(default)]
+    pub max_amount_in: u64,
+    #[serde(default)]
+    pub amount_out: u64,
+    #[serde(default)]
+    pub swap_mode: MeteoraDlmmSwapMode,
 
     // CPI log details
     pub lb_pair: Pubkey,
