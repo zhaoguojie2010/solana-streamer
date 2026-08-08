@@ -139,6 +139,7 @@ pub enum DexEvent {
     MeteoraDammV2InitializePoolWithDynamicConfigEvent(
         MeteoraDammV2InitializePoolWithDynamicConfigEvent,
     ),
+    MeteoraDammV2PoolStateAccountEvent(MeteoraDammV2PoolStateAccountEvent),
 
     // Meteora DLMM events
     MeteoraDlmmSwapEvent(MeteoraDlmmSwapEvent),
@@ -220,6 +221,7 @@ impl DexEvent {
             DexEvent::MeteoraDammV2InitializePoolEvent(e) => &e.metadata,
             DexEvent::MeteoraDammV2InitializeCustomizablePoolEvent(e) => &e.metadata,
             DexEvent::MeteoraDammV2InitializePoolWithDynamicConfigEvent(e) => &e.metadata,
+            DexEvent::MeteoraDammV2PoolStateAccountEvent(e) => &e.metadata,
             DexEvent::MeteoraDlmmSwapEvent(e) => &e.metadata,
             DexEvent::MeteoraDlmmSwap2Event(e) => &e.metadata,
             DexEvent::MeteoraDlmmLbPairAccountEvent(e) => &e.metadata,
@@ -295,6 +297,7 @@ impl DexEvent {
             DexEvent::MeteoraDammV2InitializePoolEvent(e) => &mut e.metadata,
             DexEvent::MeteoraDammV2InitializeCustomizablePoolEvent(e) => &mut e.metadata,
             DexEvent::MeteoraDammV2InitializePoolWithDynamicConfigEvent(e) => &mut e.metadata,
+            DexEvent::MeteoraDammV2PoolStateAccountEvent(e) => &mut e.metadata,
             DexEvent::MeteoraDlmmSwapEvent(e) => &mut e.metadata,
             DexEvent::MeteoraDlmmSwap2Event(e) => &mut e.metadata,
             DexEvent::MeteoraDlmmLbPairAccountEvent(e) => &mut e.metadata,

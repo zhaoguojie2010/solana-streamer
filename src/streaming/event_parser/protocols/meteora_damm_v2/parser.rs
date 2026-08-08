@@ -4,7 +4,7 @@ use crate::streaming::event_parser::{
         discriminators, meteora_damm_v2_initialize_pool_event_decode,
         meteora_damm_v2_swap_event_decode, MeteoraDammV2InitializeCustomizablePoolEvent,
         MeteoraDammV2InitializePoolEvent, MeteoraDammV2InitializePoolWithDynamicConfigEvent,
-        MeteoraDammV2Swap2Event, MeteoraDammV2SwapEvent,
+        MeteoraDammV2PoolStateAccountEvent, MeteoraDammV2Swap2Event, MeteoraDammV2SwapEvent,
     },
     DexEvent,
 };
@@ -51,6 +51,33 @@ pub fn parse_meteora_damm_v2_inner_instruction_data(
         discriminators::SWAP_EVENT => parse_swap_inner_instruction(data, metadata),
         discriminators::INITIALIZE_POOL_EVENT => {
             parse_initialize_pool_inner_instruction(data, metadata)
+        }
+        _ => None,
+    }
+}
+
+/// 解析 Meteora DAMM v2 账户数据
+///
+/// 根据判别器路由到具体的账户解析函数。目前仅支持 pool state 账户。
+pub fn parse_meteora_damm_v2_account_data(
+    discriminator: &[u8],
+    account: crate::streaming::grpc::AccountPretty,
+    mut metadata: EventMetadata,
+) -> Option<DexEvent> {
+    match discriminator {
+        discriminators::POOL_STATE_ACCOUNT => {
+            metadata.event_type = EventType::AccountMeteoraDammV2PoolState;
+            Some(DexEvent::MeteoraDammV2PoolStateAccountEvent(
+                MeteoraDammV2PoolStateAccountEvent {
+                    metadata,
+                    pubkey: account.pubkey,
+                    executable: account.executable,
+                    lamports: account.lamports,
+                    owner: account.owner,
+                    rent_epoch: account.rent_epoch,
+                    raw_account_data: account.data,
+                },
+            ))
         }
         _ => None,
     }

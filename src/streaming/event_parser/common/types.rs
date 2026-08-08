@@ -134,6 +134,7 @@ pub enum EventType {
     MeteoraDammV2InitializePool,
     MeteoraDammV2InitializeCustomizablePool,
     MeteoraDammV2InitializePoolWithDynamicConfig,
+    AccountMeteoraDammV2PoolState,
 
     // Meteora DLMM events
     MeteoraDlmmSwap,
@@ -200,6 +201,7 @@ pub const ACCOUNT_EVENT_TYPES: &[EventType] = &[
     EventType::AccountMeteoraDlmmLbPair,
     EventType::AccountMeteoraDlmmBinArray,
     EventType::AccountMeteoraDlmmBinArrayBitmapExtension,
+    EventType::AccountMeteoraDammV2PoolState,
     EventType::AccountWhirlpool,
     EventType::AccountWhirlpoolTickArray,
     EventType::TokenAccount,
@@ -265,6 +267,9 @@ impl fmt::Display for EventType {
             }
             EventType::MeteoraDammV2InitializePoolWithDynamicConfig => {
                 write!(f, "MeteoraDammV2InitializePoolWithDynamicConfig")
+            }
+            EventType::AccountMeteoraDammV2PoolState => {
+                write!(f, "AccountMeteoraDammV2PoolState")
             }
             EventType::MeteoraDlmmSwap => write!(f, "MeteoraDlmmSwap"),
             EventType::MeteoraDlmmSwap2 => write!(f, "MeteoraDlmmSwap2"),

@@ -375,6 +375,24 @@ pub struct MeteoraDammV2InitializePoolWithDynamicConfigEvent {
 }
 
 /// Event discriminators
+/// Meteora DAMM v2 pool 账户状态事件（由 gRPC account 订阅触发）。
+///
+/// 只携带账户元数据与原始 data，由下游（solarb_bot）使用其权威的
+/// `DammV2State::decode` 解析，避免在 SDK 中重复维护池状态布局。
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, BorshDeserialize)]
+pub struct MeteoraDammV2PoolStateAccountEvent {
+    #[borsh(skip)]
+    pub metadata: EventMetadata,
+    pub pubkey: Pubkey,
+    pub executable: bool,
+    pub lamports: u64,
+    pub owner: Pubkey,
+    pub rent_epoch: u64,
+    #[borsh(skip)]
+    #[serde(skip)]
+    pub raw_account_data: Vec<u8>,
+}
+
 pub mod discriminators {
     // Instruction discriminators
     // 从文档中提取的 instruction data 第一个 8 bytes
@@ -385,6 +403,9 @@ pub mod discriminators {
     pub const INITIALIZE_POOL_IX: &[u8] = &[0x5f, 0xb4, 0x0a, 0xac, 0x54, 0xae, 0xe8, 0x28]; // initialize_pool
     pub const INITIALIZE_POOL_WITH_DYNAMIC_CONFIG_IX: &[u8] =
         &[0x95, 0x52, 0x48, 0xc5, 0xfd, 0xfc, 0x44, 0x0f]; // initialize_pool_with_dynamic_config
+
+    // Account discriminators（账户 data 前 8 字节）
+    pub const POOL_STATE_ACCOUNT: &[u8] = &[0xf1, 0x9a, 0x6d, 0x04, 0x11, 0xb1, 0x6d, 0xbc];
 
     // Event discriminators (CPI Log Event)
     // e445a52e51cb9a1d 是 Meteora 的事件前缀
