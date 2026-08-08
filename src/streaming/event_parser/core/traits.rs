@@ -20,6 +20,18 @@ use serde::{Deserialize, Serialize};
 use solana_sdk::signature::Signature;
 use std::fmt::Debug;
 
+/// 交易级 swap 形态分类，用于下游快速判断一笔 tx 的池子结构。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum TxSwapKind {
+    /// 仅涉及单池单次 swap（未构成闭环，也没有同 mint 跨池）。
+    #[default]
+    SimpleSwap,
+    /// 闭环套利：同一外层指令内，DEX swap 的 mint/account legs 形成环。
+    Arb,
+    /// 跨池路由/拆单：整个 tx 内同一非稳定币 mint 出现在 ≥2 个不同池子。
+    Route,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TxDexEvents {
     pub signature: Signature,
@@ -30,6 +42,9 @@ pub struct TxDexEvents {
     pub recv_us: i64,
     /// True when an outer custom-program instruction CPI-calls DEX swaps that form a cycle.
     pub is_arb: bool,
+    /// 交易级 swap 形态分类（Arb > Route > SimpleSwap 优先级）。
+    #[serde(default)]
+    pub tx_kind: TxSwapKind,
     /// Effective transaction CU price in micro-lamports/CU; zero when not set.
     #[serde(default)]
     pub compute_unit_price_micro_lamports: u64,

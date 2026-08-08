@@ -13,7 +13,7 @@ use crate::streaming::event_parser::{
         merger_event::merge,
     },
     protocols::raydium_amm_v4::parser::RAYDIUM_AMM_V4_PROGRAM_ID,
-    DexEvent, Protocol, TxDexEvents,
+    DexEvent, Protocol, TxDexEvents, TxSwapKind,
 };
 use parking_lot::Mutex;
 use prost_types::Timestamp;
@@ -22,10 +22,20 @@ use solana_sdk::{
     transaction::VersionedTransaction,
 };
 use solana_transaction_status::InnerInstructions;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use yellowstone_grpc_proto::geyser::SubscribeUpdateTransactionInfo;
 
 const SYSTEM_PROGRAM_ID: Pubkey = solana_sdk::pubkey!("11111111111111111111111111111111");
+/// 参与套利/路由检测时视为"稳定币锚点"的 mint。
+/// 同 mint 跨池（Route）检测中排除这些 mint，避免把一笔
+/// "用 USDC 买了两个不同币"的普通 tx 误判为路由。
+const STABLECOIN_MINTS: &[Pubkey] = &[
+    solana_sdk::pubkey!("So11111111111111111111111111111111111111112"), // WSOL
+    solana_sdk::pubkey!("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"), // USDC
+    solana_sdk::pubkey!("Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"), // USDT
+    solana_sdk::pubkey!("USDJ8ZpEwKSoaiTRbZLPSqVvvtRKUTHXFMTvkEBXcYh"),   // USD1
+];
 const JITO_TIP_ACCOUNTS: &[Pubkey] = &[
     solana_sdk::pubkey!("96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5"),
     solana_sdk::pubkey!("HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe"),
@@ -210,6 +220,7 @@ impl EventParser {
             return Ok(None);
         }
         let is_arb = Self::is_arb_inner_swap_events(&events);
+        let tx_kind = Self::swap_kind_from_is_arb(is_arb, &events);
         let (compute_unit_price_micro_lamports, compute_unit_limit, compute_unit_price_set) =
             Self::summarize_compute_budget(&events);
 
@@ -221,6 +232,7 @@ impl EventParser {
             tx_index_in_entry: None,
             recv_us,
             is_arb,
+            tx_kind,
             compute_unit_price_micro_lamports,
             compute_unit_limit,
             compute_unit_price_set,
@@ -368,6 +380,7 @@ impl EventParser {
             return Ok(None);
         }
         let is_arb = Self::is_arb_inner_swap_events(&events);
+        let tx_kind = Self::swap_kind_from_is_arb(is_arb, &events);
         let (compute_unit_price_micro_lamports, compute_unit_limit, compute_unit_price_set) =
             Self::summarize_compute_budget(&events);
 
@@ -379,6 +392,7 @@ impl EventParser {
             tx_index_in_entry,
             recv_us,
             is_arb,
+            tx_kind,
             compute_unit_price_micro_lamports,
             compute_unit_limit,
             compute_unit_price_set,
@@ -1047,12 +1061,81 @@ impl EventParser {
                     (e.token_mint_b, e.token_mint_a)
                 }
             }
+            DexEvent::MeteoraDammV2SwapEvent(e) => (e.token_a_mint, e.token_b_mint),
+            DexEvent::MeteoraDammV2Swap2Event(e) => (e.token_a_mint, e.token_b_mint),
             _ => return None,
         };
         if from_mint == Pubkey::default() || to_mint == Pubkey::default() {
             None
         } else {
             Some((from_mint, to_mint))
+        }
+    }
+
+    /// 提取一笔 swap 事件对应的池子地址。
+    #[inline]
+    fn extract_swap_pool_id(event: &DexEvent) -> Option<Pubkey> {
+        match event {
+            DexEvent::PumpSwapBuyEvent(e) => Some(e.pool),
+            DexEvent::PumpSwapBuyExactQuoteInEvent(e) => Some(e.pool),
+            DexEvent::PumpSwapSellEvent(e) => Some(e.pool),
+            DexEvent::PancakeSwapSwapEvent(e) => Some(e.pool_state),
+            DexEvent::PancakeSwapSwapV2Event(e) => Some(e.pool_state),
+            DexEvent::RaydiumClmmSwapEvent(e) => Some(e.pool_state),
+            DexEvent::RaydiumClmmSwapV2Event(e) => Some(e.pool_state),
+            DexEvent::MeteoraDammV2SwapEvent(e) => Some(e.pool),
+            DexEvent::MeteoraDammV2Swap2Event(e) => Some(e.pool),
+            DexEvent::RaydiumCpmmSwapEvent(e) => Some(e.pool_state),
+            DexEvent::MeteoraDlmmSwapEvent(e) => Some(e.lb_pair),
+            DexEvent::MeteoraDlmmSwap2Event(e) => Some(e.lb_pair),
+            DexEvent::WhirlpoolSwapEvent(e) => Some(e.whirlpool),
+            DexEvent::WhirlpoolSwapV2Event(e) => Some(e.whirlpool),
+            DexEvent::BonkTradeEvent(e) => Some(e.pool_state),
+            _ => None,
+        }
+    }
+
+    /// 判断一个 mint 是否属于稳定币锚点（Route 检测中排除）。
+    #[inline]
+    fn is_stablecoin_mint(mint: &Pubkey) -> bool {
+        STABLECOIN_MINTS.contains(mint)
+    }
+
+    /// 整 tx 级"同 mint 跨池/路由拆单"检测：同一非稳定币 mint 出现在 ≥2 个不同池子。
+    /// 与 `is_arb_inner_swap_events` 不同，这里跨指令边界聚合，不需要 leg 链。
+    fn is_multi_pool_route_events(events: &[DexEvent]) -> bool {
+        // mint -> 触碰该 mint 的 distinct pool 集合
+        let mut mint_pools: HashMap<Pubkey, HashSet<[u8; 32]>> = HashMap::new();
+        for event in events {
+            let Some(pool_id) = Self::extract_swap_pool_id(event) else {
+                continue;
+            };
+            let Some((mint_a, mint_b)) = Self::extract_swap_mints(event) else {
+                continue;
+            };
+            for mint in [mint_a, mint_b] {
+                if Self::is_stablecoin_mint(&mint) {
+                    continue;
+                }
+                let pools = mint_pools.entry(mint).or_default();
+                pools.insert(pool_id.to_bytes());
+                if pools.len() >= 2 {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// 由 is_arb 布尔与整 tx 事件推导交易级 swap 形态（Arb > Route > SimpleSwap）。
+    #[inline]
+    fn swap_kind_from_is_arb(is_arb: bool, events: &[DexEvent]) -> TxSwapKind {
+        if is_arb {
+            TxSwapKind::Arb
+        } else if Self::is_multi_pool_route_events(events) {
+            TxSwapKind::Route
+        } else {
+            TxSwapKind::SimpleSwap
         }
     }
 
