@@ -1,3 +1,5 @@
+// solana-entry 的 Entry 已标记为 Agave Unstable API（v4 后可能变更），本模块是 shredded entries 流处理器，仍需依赖其布局。
+#![allow(deprecated)]
 use std::sync::Arc;
 
 use futures::StreamExt;

@@ -1,11 +1,10 @@
-use futures::{channel::mpsc, sink::Sink, Stream};
 use maplit::hashmap;
 use std::{collections::HashMap, time::Duration};
-use tonic::{transport::channel::ClientTlsConfig, Status};
-use yellowstone_grpc_client::{GeyserGrpcClient, Interceptor};
+use tonic::transport::channel::ClientTlsConfig;
+use yellowstone_grpc_client::{GeyserGrpcClient, GeyserStream, SubscribeRequestSink};
 use yellowstone_grpc_proto::geyser::{
     CommitmentLevel, SubscribeRequest, SubscribeRequestFilterAccounts,
-    SubscribeRequestFilterBlocksMeta, SubscribeRequestFilterTransactions, SubscribeUpdate,
+    SubscribeRequestFilterBlocksMeta, SubscribeRequestFilterTransactions,
 };
 
 use super::types::AccountsFilterMap;
@@ -31,7 +30,7 @@ impl SubscriptionManager {
     }
 
     /// Create gRPC connection
-    pub async fn connect(&self) -> AnyResult<GeyserGrpcClient<impl Interceptor>> {
+    pub async fn connect(&self) -> AnyResult<GeyserGrpcClient> {
         let builder = GeyserGrpcClient::build_from_shared(self.endpoint.clone())?
             .x_token(self.x_token.clone())?
             .tls_config(ClientTlsConfig::new().with_native_roots())?
@@ -48,11 +47,7 @@ impl SubscriptionManager {
         accounts: Option<AccountsFilterMap>,
         commitment: Option<CommitmentLevel>,
         event_type_filter: Option<&EventTypeFilter>,
-    ) -> AnyResult<(
-        impl Sink<SubscribeRequest, Error = mpsc::SendError>,
-        impl Stream<Item = Result<SubscribeUpdate, Status>>,
-        SubscribeRequest,
-    )> {
+    ) -> AnyResult<(SubscribeRequestSink, GeyserStream, SubscribeRequest)> {
         let blocks_meta =
             if event_type_filter.is_some() && event_type_filter.unwrap().include_block_event() {
                 hashmap! { "".to_owned() => SubscribeRequestFilterBlocksMeta {} }
@@ -98,6 +93,7 @@ impl SubscriptionManager {
                     owner: af.owner.clone(),
                     filters: af.filters.clone(),
                     nonempty_txn_signature: None,
+                    cuckoo_accounts_filter: None,
                 },
             );
         }
@@ -124,6 +120,7 @@ impl SubscriptionManager {
                     account_include: tf.account_include.clone(),
                     account_exclude: tf.account_exclude.clone(),
                     account_required: tf.account_required.clone(),
+                    token_accounts: None,
                 },
             );
         }
