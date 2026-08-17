@@ -258,6 +258,17 @@ pub fn merge(instruction_event: &mut DexEvent, cpi_log_event: DexEvent) {
             }
             _ => {}
         },
+        DexEvent::PumpSwapInitBoostEvent(e) => match cpi_log_event {
+            DexEvent::PumpSwapInitBoostEvent(cpie) => {
+                e.timestamp = cpie.timestamp;
+                e.mint = cpie.mint;
+                e.bonding_curve = cpie.bonding_curve;
+                e.pool = cpie.pool;
+                e.virtual_quote_reserves = cpie.virtual_quote_reserves;
+                e.real_quote_reserves_after = cpie.real_quote_reserves_after;
+            }
+            _ => {}
+        },
         DexEvent::PumpSwapDepositEvent(e) => match cpi_log_event {
             DexEvent::PumpSwapDepositEvent(cpie) => {
                 e.timestamp = cpie.timestamp;

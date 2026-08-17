@@ -292,6 +292,9 @@ pub struct PumpSwapCreatePoolEvent {
     pub pool_base_token_account: Pubkey,
     #[borsh(skip)]
     pub pool_quote_token_account: Pubkey,
+    /// create_pool 指令参数；CPI CreatePoolEvent 不包含该字段。
+    #[borsh(skip)]
+    pub is_cashback_coin: bool,
 }
 
 pub const PUMP_SWAP_CREATE_POOL_EVENT_LOG_SIZE: usize = 326;
@@ -301,6 +304,28 @@ pub fn pump_swap_create_pool_event_log_decode(data: &[u8]) -> Option<PumpSwapCre
         return None;
     }
     borsh::from_slice::<PumpSwapCreatePoolEvent>(&data[..PUMP_SWAP_CREATE_POOL_EVENT_LOG_SIZE]).ok()
+}
+
+/// Boost 初始化后的权威 post-state。
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, BorshDeserialize)]
+pub struct PumpSwapInitBoostEvent {
+    #[borsh(skip)]
+    pub metadata: EventMetadata,
+    pub timestamp: i64,
+    pub mint: Pubkey,
+    pub bonding_curve: Pubkey,
+    pub pool: Pubkey,
+    pub virtual_quote_reserves: i128,
+    pub real_quote_reserves_after: u64,
+}
+
+pub const PUMP_SWAP_INIT_BOOST_EVENT_LOG_SIZE: usize = 128;
+
+pub fn pump_swap_init_boost_event_log_decode(data: &[u8]) -> Option<PumpSwapInitBoostEvent> {
+    if data.len() < PUMP_SWAP_INIT_BOOST_EVENT_LOG_SIZE {
+        return None;
+    }
+    borsh::from_slice::<PumpSwapInitBoostEvent>(&data[..PUMP_SWAP_INIT_BOOST_EVENT_LOG_SIZE]).ok()
 }
 
 /// 存款事件
@@ -427,6 +452,8 @@ pub mod discriminators {
     // pub const CREATE_POOL_EVENT: &str = "0xe445a52e51cb9a1db1310cd2a076a774";
     pub const CREATE_POOL_EVENT: &[u8] =
         &[228, 69, 165, 46, 81, 203, 154, 29, 177, 49, 12, 210, 160, 118, 167, 116];
+    pub const INIT_BOOST_EVENT: &[u8] =
+        &[228, 69, 165, 46, 81, 203, 154, 29, 174, 124, 74, 249, 4, 81, 246, 17];
     // pub const DEPOSIT_EVENT: &str = "0xe445a52e51cb9a1d78f83d531f8e6b90";
     pub const DEPOSIT_EVENT: &[u8] =
         &[228, 69, 165, 46, 81, 203, 154, 29, 120, 248, 61, 83, 31, 142, 107, 144];
@@ -439,6 +466,7 @@ pub mod discriminators {
     pub const BUY_EXACT_QUOTE_IN_IX: &[u8] = &[198, 46, 21, 82, 180, 217, 232, 112];
     pub const SELL_IX: &[u8] = &[51, 230, 133, 164, 1, 127, 131, 173];
     pub const CREATE_POOL_IX: &[u8] = &[233, 146, 209, 142, 207, 104, 64, 188];
+    pub const INIT_BOOST_IX: &[u8] = &[140, 233, 33, 94, 132, 90, 194, 143];
     pub const DEPOSIT_IX: &[u8] = &[242, 35, 198, 137, 82, 225, 242, 182];
     pub const WITHDRAW_IX: &[u8] = &[183, 18, 70, 156, 148, 109, 161, 34];
 

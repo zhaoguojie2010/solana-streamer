@@ -30,7 +30,8 @@ pub struct DynamicFeeParameters {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, BorshDeserialize)]
 pub struct PoolFeeParameters {
     pub base_fee: BaseFeeParameters,
-    pub padding: [u8; 3],
+    pub compounding_fee_bps: u16,
+    pub padding: u8,
     pub dynamic_fee: Option<DynamicFeeParameters>,
 }
 

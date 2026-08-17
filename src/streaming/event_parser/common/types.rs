@@ -82,6 +82,7 @@ pub enum EventType {
     PumpSwapBuyExactQuoteIn,
     PumpSwapSell,
     PumpSwapCreatePool,
+    PumpSwapInitBoost,
     PumpSwapDeposit,
     PumpSwapWithdraw,
 
@@ -218,6 +219,7 @@ impl fmt::Display for EventType {
             EventType::PumpSwapBuyExactQuoteIn => write!(f, "PumpSwapBuyExactQuoteIn"),
             EventType::PumpSwapSell => write!(f, "PumpSwapSell"),
             EventType::PumpSwapCreatePool => write!(f, "PumpSwapCreatePool"),
+            EventType::PumpSwapInitBoost => write!(f, "PumpSwapInitBoost"),
             EventType::PumpSwapDeposit => write!(f, "PumpSwapDeposit"),
             EventType::PumpSwapWithdraw => write!(f, "PumpSwapWithdraw"),
             EventType::PumpFunCreateToken => write!(f, "PumpFunCreateToken"),

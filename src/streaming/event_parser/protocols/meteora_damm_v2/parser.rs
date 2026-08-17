@@ -67,17 +67,15 @@ pub fn parse_meteora_damm_v2_account_data(
     match discriminator {
         discriminators::POOL_STATE_ACCOUNT => {
             metadata.event_type = EventType::AccountMeteoraDammV2PoolState;
-            Some(DexEvent::MeteoraDammV2PoolStateAccountEvent(
-                MeteoraDammV2PoolStateAccountEvent {
-                    metadata,
-                    pubkey: account.pubkey,
-                    executable: account.executable,
-                    lamports: account.lamports,
-                    owner: account.owner,
-                    rent_epoch: account.rent_epoch,
-                    raw_account_data: account.data,
-                },
-            ))
+            Some(DexEvent::MeteoraDammV2PoolStateAccountEvent(MeteoraDammV2PoolStateAccountEvent {
+                metadata,
+                pubkey: account.pubkey,
+                executable: account.executable,
+                lamports: account.lamports,
+                owner: account.owner,
+                rent_epoch: account.rent_epoch,
+                raw_account_data: account.data,
+            }))
         }
         _ => None,
     }
@@ -262,7 +260,7 @@ fn parse_initialize_customizable_pool_instruction(
 
     // 计算 pool_fees 消耗的字节数
     // BaseFee: 8 + 2 + 8 + 8 + 1 = 27 bytes
-    // padding: 3 bytes
+    // compounding_fee_bps: 2 bytes, padding: 1 byte
     // option tag: 1 byte
     // 如果 dynamic_fee 存在: 2 + 16 + 2 + 2 + 2 + 4 + 4 = 32 bytes
     let pool_fees_size = 31 + if pool_fees.dynamic_fee.is_some() { 32 } else { 0 };
@@ -365,7 +363,7 @@ fn parse_initialize_pool_with_dynamic_config_instruction(
 
     // 计算 pool_fees 消耗的字节数
     // BaseFee: 8 + 2 + 8 + 8 + 1 = 27 bytes
-    // padding: 3 bytes
+    // compounding_fee_bps: 2 bytes, padding: 1 byte
     // option tag: 1 byte
     // 如果 dynamic_fee 存在: 2 + 16 + 2 + 2 + 2 + 4 + 4 = 32 bytes
     let pool_fees_size = 31 + if pool_fees.dynamic_fee.is_some() { 32 } else { 0 };

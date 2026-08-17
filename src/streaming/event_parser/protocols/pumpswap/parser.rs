@@ -4,7 +4,8 @@ use crate::streaming::event_parser::{
         discriminators, pump_swap_buy_event_log_decode, pump_swap_create_pool_event_log_decode,
         pump_swap_deposit_event_log_decode, pump_swap_sell_event_log_decode,
         pump_swap_withdraw_event_log_decode, PumpSwapBuyEvent, PumpSwapBuyExactQuoteInEvent,
-        PumpSwapCreatePoolEvent, PumpSwapDepositEvent, PumpSwapSellEvent, PumpSwapWithdrawEvent,
+        PumpSwapCreatePoolEvent, PumpSwapDepositEvent, PumpSwapInitBoostEvent, PumpSwapSellEvent,
+        PumpSwapWithdrawEvent,
     },
     DexEvent,
 };
@@ -30,6 +31,7 @@ pub fn parse_pumpswap_instruction_data(
         }
         discriminators::SELL_IX => parse_sell_instruction(data, accounts, metadata),
         discriminators::CREATE_POOL_IX => parse_create_pool_instruction(data, accounts, metadata),
+        discriminators::INIT_BOOST_IX => parse_init_boost_instruction(accounts, metadata),
         discriminators::DEPOSIT_IX => parse_deposit_instruction(data, accounts, metadata),
         discriminators::WITHDRAW_IX => parse_withdraw_instruction(data, accounts, metadata),
         _ => None,
@@ -48,6 +50,7 @@ pub fn parse_pumpswap_inner_instruction_data(
         discriminators::BUY_EVENT => parse_buy_inner_instruction(data, metadata),
         discriminators::SELL_EVENT => parse_sell_inner_instruction(data, metadata),
         discriminators::CREATE_POOL_EVENT => parse_create_pool_inner_instruction(data, metadata),
+        discriminators::INIT_BOOST_EVENT => parse_init_boost_inner_instruction(data, metadata),
         discriminators::DEPOSIT_EVENT => parse_deposit_inner_instruction(data, metadata),
         discriminators::WITHDRAW_EVENT => parse_withdraw_inner_instruction(data, metadata),
         _ => None,
@@ -105,6 +108,11 @@ fn parse_create_pool_inner_instruction(data: &[u8], metadata: EventMetadata) -> 
     } else {
         None
     }
+}
+
+fn parse_init_boost_inner_instruction(data: &[u8], metadata: EventMetadata) -> Option<DexEvent> {
+    let event = super::pump_swap_init_boost_event_log_decode(data)?;
+    Some(DexEvent::PumpSwapInitBoostEvent(PumpSwapInitBoostEvent { metadata, ..event }))
 }
 
 /// 解析存款日志事件
@@ -266,6 +274,7 @@ fn parse_create_pool_instruction(
         Pubkey::default()
     };
     let is_mayhem_mode = data.get(50).copied().unwrap_or_default() != 0;
+    let is_cashback_coin = data.get(51).copied().unwrap_or_default() != 0;
 
     Some(DexEvent::PumpSwapCreatePoolEvent(PumpSwapCreatePoolEvent {
         metadata,
@@ -284,6 +293,20 @@ fn parse_create_pool_instruction(
         pool_quote_token_account: accounts[10],
         coin_creator,
         is_mayhem_mode,
+        is_cashback_coin,
+        ..Default::default()
+    }))
+}
+
+fn parse_init_boost_instruction(
+    accounts: &[Pubkey],
+    mut metadata: EventMetadata,
+) -> Option<DexEvent> {
+    metadata.event_type = EventType::PumpSwapInitBoost;
+    Some(DexEvent::PumpSwapInitBoostEvent(PumpSwapInitBoostEvent {
+        metadata,
+        pool: *accounts.first()?,
+        mint: accounts.get(3).copied().unwrap_or_default(),
         ..Default::default()
     }))
 }
