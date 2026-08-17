@@ -4,7 +4,8 @@ use tonic::transport::channel::ClientTlsConfig;
 use yellowstone_grpc_client::{GeyserGrpcClient, GeyserStream, SubscribeRequestSink};
 use yellowstone_grpc_proto::geyser::{
     CommitmentLevel, SubscribeRequest, SubscribeRequestFilterAccounts,
-    SubscribeRequestFilterBlocksMeta, SubscribeRequestFilterTransactions,
+    SubscribeRequestFilterBlocksMeta, SubscribeRequestFilterSlots,
+    SubscribeRequestFilterTransactions,
 };
 
 use super::types::AccountsFilterMap;
@@ -48,6 +49,25 @@ impl SubscriptionManager {
         commitment: Option<CommitmentLevel>,
         event_type_filter: Option<&EventTypeFilter>,
     ) -> AnyResult<(SubscribeRequestSink, GeyserStream, SubscribeRequest)> {
+        self.subscribe_with_request_and_slots(
+            transactions,
+            accounts,
+            None,
+            commitment,
+            event_type_filter,
+        )
+        .await
+    }
+
+    /// Create a subscription that may combine transaction/account and slot filters.
+    pub async fn subscribe_with_request_and_slots(
+        &self,
+        transactions: Option<TransactionsFilterMap>,
+        accounts: Option<AccountsFilterMap>,
+        slots: Option<HashMap<String, SubscribeRequestFilterSlots>>,
+        commitment: Option<CommitmentLevel>,
+        event_type_filter: Option<&EventTypeFilter>,
+    ) -> AnyResult<(SubscribeRequestSink, GeyserStream, SubscribeRequest)> {
         let blocks_meta =
             if event_type_filter.is_some() && event_type_filter.unwrap().include_block_event() {
                 hashmap! { "".to_owned() => SubscribeRequestFilterBlocksMeta {} }
@@ -58,6 +78,7 @@ impl SubscriptionManager {
             };
         let subscribe_request = SubscribeRequest {
             accounts: accounts.unwrap_or_default(),
+            slots: slots.unwrap_or_default(),
             transactions: transactions.unwrap_or_default(),
             blocks_meta,
             commitment: if let Some(commitment) = commitment {

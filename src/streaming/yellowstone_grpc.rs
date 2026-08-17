@@ -13,12 +13,14 @@ use futures::channel::mpsc;
 use futures::{SinkExt, StreamExt};
 use log::error;
 use solana_sdk::pubkey::Pubkey;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use yellowstone_grpc_proto::geyser::subscribe_update::UpdateOneof;
 use yellowstone_grpc_proto::geyser::{
-    CommitmentLevel, SubscribeRequest, SubscribeRequestFilterAccountsFilter, SubscribeRequestPing,
+    CommitmentLevel, SubscribeRequest, SubscribeRequestFilterAccountsFilter,
+    SubscribeRequestFilterSlots, SubscribeRequestPing, SubscribeUpdateSlot,
 };
 
 /// 交易过滤器
@@ -143,6 +145,69 @@ impl YellowstoneGrpc {
     where
         F: Fn(DexEvent) + Send + Sync + 'static,
     {
+        self.subscribe_events_immediate_inner(
+            protocols,
+            bot_wallet,
+            transaction_filter,
+            account_filter,
+            event_type_filter,
+            commitment,
+            None,
+            callback,
+            |_| {},
+        )
+        .await
+    }
+
+    /// Subscribe to parsed events and processed slot updates on one Yellowstone stream.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn subscribe_events_and_slots_immediate<F, S>(
+        &self,
+        protocols: Vec<Protocol>,
+        bot_wallet: Option<Pubkey>,
+        transaction_filter: Vec<TransactionFilter>,
+        account_filter: Vec<AccountFilter>,
+        event_type_filter: Option<EventTypeFilter>,
+        commitment: Option<CommitmentLevel>,
+        slot_filter: SubscribeRequestFilterSlots,
+        callback: F,
+        slot_callback: S,
+    ) -> AnyResult<()>
+    where
+        F: Fn(DexEvent) + Send + Sync + 'static,
+        S: Fn(SubscribeUpdateSlot) + Send + Sync + 'static,
+    {
+        self.subscribe_events_immediate_inner(
+            protocols,
+            bot_wallet,
+            transaction_filter,
+            account_filter,
+            event_type_filter,
+            commitment,
+            Some(HashMap::from([("slots".to_owned(), slot_filter)])),
+            callback,
+            slot_callback,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn subscribe_events_immediate_inner<F, S>(
+        &self,
+        protocols: Vec<Protocol>,
+        bot_wallet: Option<Pubkey>,
+        transaction_filter: Vec<TransactionFilter>,
+        account_filter: Vec<AccountFilter>,
+        event_type_filter: Option<EventTypeFilter>,
+        commitment: Option<CommitmentLevel>,
+        slots: Option<HashMap<String, SubscribeRequestFilterSlots>>,
+        callback: F,
+        slot_callback: S,
+    ) -> AnyResult<()>
+    where
+        F: Fn(DexEvent) + Send + Sync + 'static,
+        S: Fn(SubscribeUpdateSlot) + Send + Sync + 'static,
+    {
         *self.event_type_filter.write().await = event_type_filter.clone();
         if self
             .active_subscription
@@ -168,7 +233,13 @@ impl YellowstoneGrpc {
         // 订阅事件
         let (subscribe_tx, mut stream, subscribe_request) = self
             .subscription_manager
-            .subscribe_with_request(transactions, accounts, commitment, event_type_filter.as_ref())
+            .subscribe_with_request_and_slots(
+                transactions,
+                accounts,
+                slots,
+                commitment,
+                event_type_filter.as_ref(),
+            )
             .await?;
 
         // 用 Arc<Mutex<>> 包装 subscribe_tx 以支持多线程共享
@@ -179,6 +250,7 @@ impl YellowstoneGrpc {
 
         // Wrap callback once before the async block
         let callback = Arc::new(callback);
+        let slot_callback = Arc::new(slot_callback);
         let swap_cu_parse_config = self.config.swap_cu_parse_config.clone();
 
         let stream_handle = tokio::spawn(async move {
@@ -240,6 +312,9 @@ impl YellowstoneGrpc {
                                         {
                                             error!("Error processing transaction event: {e:?}");
                                         }
+                                    }
+                                    Some(UpdateOneof::Slot(slot)) => {
+                                        slot_callback(slot);
                                     }
                                     Some(UpdateOneof::Ping(_)) => {
                                         // 只在需要时获取锁，并立即释放
