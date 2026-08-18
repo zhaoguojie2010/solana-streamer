@@ -29,8 +29,9 @@ pub struct AmmConfig {
     pub padding: [u64; 15],
 }
 
-// 计算: 1 (bump) + 1 (disable_create_pool) + 2 (index) + 4*8 (trade_fee_rate, protocol_fee_rate, fund_fee_rate, create_pool_fee) + 32*2 (protocol_owner, fund_owner) + 8 (creator_fee_rate) + 8*15 (padding) = 236
-pub const AMM_CONFIG_SIZE: usize = 236;
+// `AmmConfig::LEN` is 236 bytes including Anchor's 8-byte account discriminator.
+// The Borsh payload starts after the discriminator: 1 + 1 + 2 + 4*8 + 32*2 + 8 + 15*8 = 228.
+pub const AMM_CONFIG_SIZE: usize = 228;
 
 pub fn amm_config_decode(data: &[u8]) -> Option<AmmConfig> {
     if data.len() < AMM_CONFIG_SIZE {
