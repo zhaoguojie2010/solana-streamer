@@ -147,6 +147,7 @@ pub async fn process_grpc_tx_events(
     protocols: &[Protocol],
     event_type_filter: Option<&EventTypeFilter>,
     swap_cu_parse_config: Option<&SwapCuParseConfig>,
+    tx_exec_meta_audit: bool,
     callback: Arc<dyn Fn(TxDexEvents) + Send + Sync>,
     bot_wallet: Option<Pubkey>,
 ) -> AnyResult<()> {
@@ -174,6 +175,7 @@ pub async fn process_grpc_tx_events(
         bot_wallet,
         transaction_index,
         swap_cu_parse_config,
+        tx_exec_meta_audit,
     )
     .await?
     {

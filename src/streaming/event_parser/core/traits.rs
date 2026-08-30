@@ -17,7 +17,7 @@ use crate::streaming::event_parser::protocols::raydium_clmm::events::*;
 use crate::streaming::event_parser::protocols::raydium_cpmm::events::*;
 use crate::streaming::event_parser::protocols::whirlpool::events::*;
 use serde::{Deserialize, Serialize};
-use solana_sdk::signature::Signature;
+use solana_sdk::{pubkey::Pubkey, signature::Signature};
 use std::fmt::Debug;
 
 /// 交易级 swap 形态分类，用于下游快速判断一笔 tx 的池子结构。
@@ -30,6 +30,24 @@ pub enum TxSwapKind {
     Arb,
     /// 跨池路由/拆单：整个 tx 内同一非稳定币 mint 出现在 ≥2 个不同池子。
     Route,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TxTokenBalanceChange {
+    pub account_index: u32,
+    pub account: Option<Pubkey>,
+    pub mint: String,
+    pub owner: String,
+    pub program_id: String,
+    pub decimals: u32,
+    pub pre_amount: Option<u64>,
+    pub post_amount: Option<u64>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TxExecutionMetaAudit {
+    pub token_balance_changes: Vec<TxTokenBalanceChange>,
+    pub parse_errors: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -57,6 +75,9 @@ pub struct TxDexEvents {
     /// True only when a System Program transfer pays a known Jito tip account.
     #[serde(default)]
     pub has_jito_tip: bool,
+    /// Present only when explicitly enabled by the stream client.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tx_exec_meta: Option<TxExecutionMetaAudit>,
     pub events: Vec<DexEvent>,
 }
 
@@ -140,11 +161,13 @@ pub enum DexEvent {
     MeteoraDammV2InitializePoolWithDynamicConfigEvent(
         MeteoraDammV2InitializePoolWithDynamicConfigEvent,
     ),
+    MeteoraDammV2LiquidityChangeEvent(MeteoraDammV2LiquidityChangeEvent),
     MeteoraDammV2PoolStateAccountEvent(MeteoraDammV2PoolStateAccountEvent),
 
     // Meteora DLMM events
     MeteoraDlmmSwapEvent(MeteoraDlmmSwapEvent),
     MeteoraDlmmSwap2Event(MeteoraDlmmSwap2Event),
+    MeteoraDlmmInstructionEvent(MeteoraDlmmInstructionEvent),
     MeteoraDlmmLbPairAccountEvent(MeteoraDlmmLbPairAccountEvent),
     MeteoraDlmmBinArrayAccountEvent(MeteoraDlmmBinArrayAccountEvent),
     MeteoraDlmmBinArrayBitmapExtensionAccountEvent(MeteoraDlmmBinArrayBitmapExtensionAccountEvent),
@@ -223,9 +246,11 @@ impl DexEvent {
             DexEvent::MeteoraDammV2InitializePoolEvent(e) => &e.metadata,
             DexEvent::MeteoraDammV2InitializeCustomizablePoolEvent(e) => &e.metadata,
             DexEvent::MeteoraDammV2InitializePoolWithDynamicConfigEvent(e) => &e.metadata,
+            DexEvent::MeteoraDammV2LiquidityChangeEvent(e) => &e.metadata,
             DexEvent::MeteoraDammV2PoolStateAccountEvent(e) => &e.metadata,
             DexEvent::MeteoraDlmmSwapEvent(e) => &e.metadata,
             DexEvent::MeteoraDlmmSwap2Event(e) => &e.metadata,
+            DexEvent::MeteoraDlmmInstructionEvent(e) => &e.metadata,
             DexEvent::MeteoraDlmmLbPairAccountEvent(e) => &e.metadata,
             DexEvent::MeteoraDlmmBinArrayAccountEvent(e) => &e.metadata,
             DexEvent::MeteoraDlmmBinArrayBitmapExtensionAccountEvent(e) => &e.metadata,
@@ -300,9 +325,11 @@ impl DexEvent {
             DexEvent::MeteoraDammV2InitializePoolEvent(e) => &mut e.metadata,
             DexEvent::MeteoraDammV2InitializeCustomizablePoolEvent(e) => &mut e.metadata,
             DexEvent::MeteoraDammV2InitializePoolWithDynamicConfigEvent(e) => &mut e.metadata,
+            DexEvent::MeteoraDammV2LiquidityChangeEvent(e) => &mut e.metadata,
             DexEvent::MeteoraDammV2PoolStateAccountEvent(e) => &mut e.metadata,
             DexEvent::MeteoraDlmmSwapEvent(e) => &mut e.metadata,
             DexEvent::MeteoraDlmmSwap2Event(e) => &mut e.metadata,
+            DexEvent::MeteoraDlmmInstructionEvent(e) => &mut e.metadata,
             DexEvent::MeteoraDlmmLbPairAccountEvent(e) => &mut e.metadata,
             DexEvent::MeteoraDlmmBinArrayAccountEvent(e) => &mut e.metadata,
             DexEvent::MeteoraDlmmBinArrayBitmapExtensionAccountEvent(e) => &mut e.metadata,

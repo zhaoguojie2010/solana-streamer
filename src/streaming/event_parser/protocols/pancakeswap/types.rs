@@ -3,8 +3,7 @@ use crate::streaming::{
         common::{EventMetadata, EventType},
         protocols::{
             pancakeswap::{
-                PancakeSwapPoolStateAccountEvent,
-                PancakeSwapTickArrayBitmapExtensionAccountEvent,
+                PancakeSwapPoolStateAccountEvent, PancakeSwapTickArrayBitmapExtensionAccountEvent,
                 PancakeSwapTickArrayStateAccountEvent,
             },
             raydium_clmm::types as clmm_types,
@@ -41,18 +40,16 @@ pub fn pool_state_parser(account: AccountPretty, mut metadata: EventMetadata) ->
         return None;
     }
     let pool_state = pool_state_decode(&account.data[8..POOL_STATE_SIZE + 8])?;
-    Some(DexEvent::PancakeSwapPoolStateAccountEvent(
-        PancakeSwapPoolStateAccountEvent {
-            metadata,
-            pubkey: account.pubkey,
-            executable: account.executable,
-            lamports: account.lamports,
-            owner: account.owner,
-            rent_epoch: account.rent_epoch,
-            raw_account_data: account.data,
-            pool_state,
-        },
-    ))
+    Some(DexEvent::PancakeSwapPoolStateAccountEvent(PancakeSwapPoolStateAccountEvent {
+        metadata,
+        pubkey: account.pubkey,
+        executable: account.executable,
+        lamports: account.lamports,
+        owner: account.owner,
+        rent_epoch: account.rent_epoch,
+        raw_account_data: account.data,
+        pool_state,
+    }))
 }
 
 pub fn tick_array_state_parser(
@@ -65,18 +62,16 @@ pub fn tick_array_state_parser(
         return None;
     }
     let tick_array_state = tick_array_state_decode(&account.data[8..TICK_ARRAY_STATE_SIZE + 8])?;
-    Some(DexEvent::PancakeSwapTickArrayStateAccountEvent(
-        PancakeSwapTickArrayStateAccountEvent {
-            metadata,
-            pubkey: account.pubkey,
-            executable: account.executable,
-            lamports: account.lamports,
-            owner: account.owner,
-            rent_epoch: account.rent_epoch,
-            raw_account_data: account.data,
-            tick_array_state,
-        },
-    ))
+    Some(DexEvent::PancakeSwapTickArrayStateAccountEvent(PancakeSwapTickArrayStateAccountEvent {
+        metadata,
+        pubkey: account.pubkey,
+        executable: account.executable,
+        lamports: account.lamports,
+        owner: account.owner,
+        rent_epoch: account.rent_epoch,
+        raw_account_data: account.data,
+        tick_array_state,
+    }))
 }
 
 pub fn tick_array_bitmap_extension_parser(

@@ -27,8 +27,7 @@ pub struct GlobalConfig {
     pub is_cashback_enabled: bool,
 }
 
-pub const GLOBAL_CONFIG_SIZE: usize =
-    32 + 8 + 8 + 1 + 32 * 8 + 8 + 32 + 32 + 32 + 1 + 32 * 7 + 1;
+pub const GLOBAL_CONFIG_SIZE: usize = 32 + 8 + 8 + 1 + 32 * 8 + 8 + 32 + 32 + 32 + 1 + 32 * 7 + 1;
 
 pub fn global_config_decode(data: &[u8]) -> Option<GlobalConfig> {
     if data.len() < GLOBAL_CONFIG_SIZE {

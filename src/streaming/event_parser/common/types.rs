@@ -135,6 +135,7 @@ pub enum EventType {
     MeteoraDammV2InitializePool,
     MeteoraDammV2InitializeCustomizablePool,
     MeteoraDammV2InitializePoolWithDynamicConfig,
+    MeteoraDammV2LiquidityChange,
     AccountMeteoraDammV2PoolState,
 
     // Meteora DLMM events
@@ -177,6 +178,7 @@ pub enum EventType {
     BlockMeta,
     SetComputeUnitLimit,
     SetComputeUnitPrice,
+    RaydiumCpmmInitializeWithPermission,
     Unknown,
 }
 
@@ -240,6 +242,9 @@ impl fmt::Display for EventType {
             EventType::RaydiumCpmmSwapBaseOutput => write!(f, "RaydiumCpmmSwapBaseOutput"),
             EventType::RaydiumCpmmDeposit => write!(f, "RaydiumCpmmDeposit"),
             EventType::RaydiumCpmmInitialize => write!(f, "RaydiumCpmmInitialize"),
+            EventType::RaydiumCpmmInitializeWithPermission => {
+                write!(f, "RaydiumCpmmInitializeWithPermission")
+            }
             EventType::RaydiumCpmmWithdraw => write!(f, "RaydiumCpmmWithdraw"),
             EventType::RaydiumClmmSwap => write!(f, "RaydiumClmmSwap"),
             EventType::RaydiumClmmSwapV2 => write!(f, "RaydiumClmmSwapV2"),
@@ -269,6 +274,9 @@ impl fmt::Display for EventType {
             }
             EventType::MeteoraDammV2InitializePoolWithDynamicConfig => {
                 write!(f, "MeteoraDammV2InitializePoolWithDynamicConfig")
+            }
+            EventType::MeteoraDammV2LiquidityChange => {
+                write!(f, "MeteoraDammV2LiquidityChange")
             }
             EventType::AccountMeteoraDammV2PoolState => {
                 write!(f, "AccountMeteoraDammV2PoolState")

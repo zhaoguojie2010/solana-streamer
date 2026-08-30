@@ -114,7 +114,7 @@ impl SubscriptionManager {
                     owner: af.owner.clone(),
                     filters: af.filters.clone(),
                     nonempty_txn_signature: None,
-                    cuckoo_accounts_filter: None,
+                    cuckoo_accounts_filter: af.cuckoo_accounts_filter.clone(),
                 },
             );
         }

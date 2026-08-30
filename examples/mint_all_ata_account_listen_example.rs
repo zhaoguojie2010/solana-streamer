@@ -60,6 +60,7 @@ async fn test_grpc() -> Result<(), Box<dyn std::error::Error>> {
                 data: Some(Data::Bytes(pump.to_bytes().to_vec())),
             })),
         }],
+        cuckoo_accounts_filter: None,
     };
     let all_usdc_ata = AccountFilter {
         account: vec![],
@@ -70,6 +71,7 @@ async fn test_grpc() -> Result<(), Box<dyn std::error::Error>> {
                 data: Some(Data::Bytes(usdc.to_bytes().to_vec())),
             })),
         }],
+        cuckoo_accounts_filter: None,
     };
 
     // Event filtering

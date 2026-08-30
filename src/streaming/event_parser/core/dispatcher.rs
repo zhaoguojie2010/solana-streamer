@@ -338,9 +338,11 @@ impl EventDispatcher {
             Protocol::RaydiumAmmV4 => {
                 raydium_amm_v4::parse_raydium_amm_v4_account_data(discriminator, account, metadata)
             }
-            Protocol::MeteoraDammV2 => {
-                meteora_damm_v2::parse_meteora_damm_v2_account_data(discriminator, account, metadata)
-            }
+            Protocol::MeteoraDammV2 => meteora_damm_v2::parse_meteora_damm_v2_account_data(
+                discriminator,
+                account,
+                metadata,
+            ),
             Protocol::MeteoraDlmm => {
                 meteora_dlmm::parse_meteora_dlmm_account_data(discriminator, account, metadata)
             }

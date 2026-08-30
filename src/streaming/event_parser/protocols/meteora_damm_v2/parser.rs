@@ -2,8 +2,9 @@ use crate::streaming::event_parser::{
     common::{EventMetadata, EventType},
     protocols::meteora_damm_v2::{
         discriminators, meteora_damm_v2_initialize_pool_event_decode,
-        meteora_damm_v2_swap_event_decode, MeteoraDammV2InitializeCustomizablePoolEvent,
-        MeteoraDammV2InitializePoolEvent, MeteoraDammV2InitializePoolWithDynamicConfigEvent,
+        meteora_damm_v2_liquidity_change_event_decode, meteora_damm_v2_swap_event_decode,
+        MeteoraDammV2InitializeCustomizablePoolEvent, MeteoraDammV2InitializePoolEvent,
+        MeteoraDammV2InitializePoolWithDynamicConfigEvent, MeteoraDammV2LiquidityChangeEvent,
         MeteoraDammV2PoolStateAccountEvent, MeteoraDammV2Swap2Event, MeteoraDammV2SwapEvent,
     },
     DexEvent,
@@ -13,6 +14,13 @@ use solana_sdk::pubkey::Pubkey;
 /// Meteora DAMM v2 程序ID
 pub const METEORA_DAMM_V2_PROGRAM_ID: Pubkey =
     solana_sdk::pubkey!("cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG");
+
+#[derive(Clone, Copy)]
+enum LiquidityInstructionKind {
+    Add,
+    Remove,
+    RemoveAll,
+}
 
 /// 解析 Meteora DAMM v2 instruction data
 ///
@@ -35,6 +43,24 @@ pub fn parse_meteora_damm_v2_instruction_data(
         discriminators::INITIALIZE_POOL_WITH_DYNAMIC_CONFIG_IX => {
             parse_initialize_pool_with_dynamic_config_instruction(data, accounts, metadata)
         }
+        discriminators::ADD_LIQUIDITY_IX => parse_liquidity_change_instruction(
+            data,
+            accounts,
+            metadata,
+            LiquidityInstructionKind::Add,
+        ),
+        discriminators::REMOVE_LIQUIDITY_IX => parse_liquidity_change_instruction(
+            data,
+            accounts,
+            metadata,
+            LiquidityInstructionKind::Remove,
+        ),
+        discriminators::REMOVE_ALL_LIQUIDITY_IX => parse_liquidity_change_instruction(
+            data,
+            accounts,
+            metadata,
+            LiquidityInstructionKind::RemoveAll,
+        ),
         _ => None,
     }
 }
@@ -51,6 +77,9 @@ pub fn parse_meteora_damm_v2_inner_instruction_data(
         discriminators::SWAP_EVENT => parse_swap_inner_instruction(data, metadata),
         discriminators::INITIALIZE_POOL_EVENT => {
             parse_initialize_pool_inner_instruction(data, metadata)
+        }
+        discriminators::LIQUIDITY_CHANGE_EVENT => {
+            parse_liquidity_change_inner_instruction(data, metadata)
         }
         _ => None,
     }
@@ -441,6 +470,41 @@ fn parse_initialize_pool_with_dynamic_config_instruction(
     ))
 }
 
+/// Parse the common state-change boundary shared by every liquidity instruction.
+/// The CPI event later replaces these instruction-derived fields with authoritative values.
+fn parse_liquidity_change_instruction(
+    data: &[u8],
+    accounts: &[Pubkey],
+    mut metadata: EventMetadata,
+    kind: LiquidityInstructionKind,
+) -> Option<DexEvent> {
+    let (pool_index, position_index, change_type, liquidity_delta, threshold_offset) = match kind {
+        LiquidityInstructionKind::Add => {
+            (0, 1, 0, u128::from_le_bytes(data.get(..16)?.try_into().ok()?), 16)
+        }
+        LiquidityInstructionKind::Remove => {
+            (1, 2, 1, u128::from_le_bytes(data.get(..16)?.try_into().ok()?), 16)
+        }
+        LiquidityInstructionKind::RemoveAll => (1, 2, 1, 0, 0),
+    };
+    let token_a_amount_threshold =
+        u64::from_le_bytes(data.get(threshold_offset..threshold_offset + 8)?.try_into().ok()?);
+    let token_b_amount_threshold =
+        u64::from_le_bytes(data.get(threshold_offset + 8..threshold_offset + 16)?.try_into().ok()?);
+
+    metadata.event_type = EventType::MeteoraDammV2LiquidityChange;
+    Some(DexEvent::MeteoraDammV2LiquidityChangeEvent(MeteoraDammV2LiquidityChangeEvent {
+        metadata,
+        pool: accounts.get(pool_index).copied()?,
+        position: accounts.get(position_index).copied()?,
+        liquidity_delta,
+        token_a_amount_threshold,
+        token_b_amount_threshold,
+        change_type,
+        ..Default::default()
+    }))
+}
+
 /// 解析 swap inner instruction (CPI event)
 fn parse_swap_inner_instruction(data: &[u8], metadata: EventMetadata) -> Option<DexEvent> {
     if let Some(event) = meteora_damm_v2_swap_event_decode(data) {
@@ -464,4 +528,18 @@ fn parse_initialize_pool_inner_instruction(
     } else {
         None
     }
+}
+
+/// Parse the authoritative post-change reserves emitted by add/remove liquidity.
+fn parse_liquidity_change_inner_instruction(
+    data: &[u8],
+    mut metadata: EventMetadata,
+) -> Option<DexEvent> {
+    metadata.event_type = EventType::MeteoraDammV2LiquidityChange;
+    meteora_damm_v2_liquidity_change_event_decode(data).map(|event| {
+        DexEvent::MeteoraDammV2LiquidityChangeEvent(MeteoraDammV2LiquidityChangeEvent {
+            metadata,
+            ..event
+        })
+    })
 }

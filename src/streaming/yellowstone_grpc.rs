@@ -19,7 +19,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use yellowstone_grpc_proto::geyser::subscribe_update::UpdateOneof;
 use yellowstone_grpc_proto::geyser::{
-    CommitmentLevel, SubscribeRequest, SubscribeRequestFilterAccountsFilter,
+    CommitmentLevel, CuckooFilter, SubscribeRequest, SubscribeRequestFilterAccountsFilter,
     SubscribeRequestFilterSlots, SubscribeRequestPing, SubscribeUpdateSlot,
 };
 
@@ -37,6 +37,7 @@ pub struct AccountFilter {
     pub account: Vec<String>,
     pub owner: Vec<String>,
     pub filters: Vec<SubscribeRequestFilterAccountsFilter>,
+    pub cuckoo_accounts_filter: Option<CuckooFilter>,
 }
 
 pub struct YellowstoneGrpc {
@@ -408,6 +409,7 @@ impl YellowstoneGrpc {
 
         let callback = Arc::new(callback);
         let swap_cu_parse_config = self.config.swap_cu_parse_config.clone();
+        let tx_exec_meta_audit = self.config.tx_exec_meta_audit;
 
         let stream_handle = tokio::spawn(async move {
             loop {
@@ -429,6 +431,7 @@ impl YellowstoneGrpc {
                                             &protocols,
                                             event_type_filter.as_ref(),
                                             swap_cu_parse_config.as_ref(),
+                                            tx_exec_meta_audit,
                                             callback.clone(),
                                             bot_wallet,
                                         )

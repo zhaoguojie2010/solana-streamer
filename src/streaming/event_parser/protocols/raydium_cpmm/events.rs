@@ -76,7 +76,10 @@ pub struct RaydiumCpmmInitializeEvent {
     pub init_amount0: u64,
     pub init_amount1: u64,
     pub open_time: u64,
+    pub creator_fee_on: u8,
+    pub enable_creator_fee: bool,
 
+    pub payer: Pubkey,
     pub creator: Pubkey,
     pub amm_config: Pubkey,
     pub authority: Pubkey,
@@ -91,6 +94,7 @@ pub struct RaydiumCpmmInitializeEvent {
     pub token1_vault: Pubkey,
     pub create_pool_fee: Pubkey,
     pub observation_state: Pubkey,
+    pub permission: Pubkey,
     pub token_program: Pubkey,
     pub token0_program: Pubkey,
     pub token1_program: Pubkey,
@@ -163,6 +167,7 @@ pub mod discriminators {
     pub const SWAP_BASE_OUT: &[u8] = &[55, 217, 98, 86, 163, 74, 180, 173];
     pub const DEPOSIT: &[u8] = &[242, 35, 198, 137, 82, 225, 242, 182];
     pub const INITIALIZE: &[u8] = &[175, 175, 109, 31, 13, 152, 155, 237];
+    pub const INITIALIZE_WITH_PERMISSION: &[u8] = &[63, 55, 254, 65, 49, 178, 89, 121];
     pub const WITHDRAW: &[u8] = &[183, 18, 70, 156, 148, 109, 161, 34];
 
     // 账号鉴别器

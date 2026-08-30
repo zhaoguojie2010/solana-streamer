@@ -23,10 +23,7 @@ pub struct SwapCuParseConfig {
 
 impl SwapCuParseConfig {
     pub fn default_enabled() -> Self {
-        Self {
-            enabled: true,
-            targets: default_swap_cu_targets(),
-        }
+        Self { enabled: true, targets: default_swap_cu_targets() }
     }
 
     #[inline]
@@ -175,10 +172,8 @@ pub fn build_swap_cu_index(
     inner_instructions: &[yellowstone_grpc_proto::prelude::InnerInstructions],
 ) -> SwapCuIndex {
     let outer_len = outer_instructions.len();
-    let mut index = SwapCuIndex {
-        outer: vec![None; outer_len],
-        inner: vec![Vec::new(); outer_len],
-    };
+    let mut index =
+        SwapCuIndex { outer: vec![None; outer_len], inner: vec![Vec::new(); outer_len] };
 
     for inner in inner_instructions.iter() {
         let outer_idx = inner.index as usize;
@@ -223,9 +218,8 @@ pub fn build_swap_cu_index(
             .collect();
         inner_spans.sort_by_key(|span| span.start);
 
-        let Some(inner_group) = inner_instructions
-            .iter()
-            .find(|inner| inner.index as usize == outer_idx)
+        let Some(inner_group) =
+            inner_instructions.iter().find(|inner| inner.index as usize == outer_idx)
         else {
             continue;
         };
@@ -254,8 +248,7 @@ pub fn build_swap_cu_index(
 
 pub fn default_swap_cu_targets() -> Vec<SwapCuTarget> {
     use crate::streaming::event_parser::protocols::{
-        meteora_damm_v2, meteora_dlmm, pancakeswap, pumpswap, raydium_clmm, raydium_cpmm,
-        whirlpool,
+        meteora_damm_v2, meteora_dlmm, pancakeswap, pumpswap, raydium_clmm, raydium_cpmm, whirlpool,
     };
 
     vec![

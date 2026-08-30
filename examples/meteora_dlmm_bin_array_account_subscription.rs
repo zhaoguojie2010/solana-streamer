@@ -56,6 +56,7 @@ async fn subscribe_meteora_dlmm_bin_array_accounts() -> Result<(), Box<dyn std::
                 data: Some(Data::Bytes(discriminators::BIN_ARRAY.to_vec())),
             })),
         }],
+        cuckoo_accounts_filter: None,
     };
 
     // 交易过滤器（可选，如果只想订阅账户数据，可以留空）

@@ -72,8 +72,12 @@ async fn test_grpc() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // Listen to account data belonging to owner programs -> account event monitoring
-    let account_filter =
-        AccountFilter { account: vec![], owner: account_include.clone(), filters: vec![] };
+    let account_filter = AccountFilter {
+        account: vec![],
+        owner: account_include.clone(),
+        filters: vec![],
+        cuckoo_accounts_filter: None,
+    };
 
     // Event filtering
     // No event filtering, includes all events

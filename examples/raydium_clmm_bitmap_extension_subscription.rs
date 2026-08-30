@@ -42,6 +42,7 @@ async fn subscribe_raydium_clmm_bitmap_extension() -> Result<(), Box<dyn std::er
         account: vec![],
         owner: vec![RAYDIUM_CLMM_PROGRAM_ID.to_string()],
         filters: vec![],
+        cuckoo_accounts_filter: None,
     };
 
     // 交易过滤器（可选，如果只想订阅账户数据，可以留空）

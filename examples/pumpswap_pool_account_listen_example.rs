@@ -62,6 +62,7 @@ async fn test_grpc() -> Result<(), Box<dyn std::error::Error>> {
                 data: Some(Data::Bytes(pump_usdc.to_bytes().to_vec())),
             })),
         }],
+        cuckoo_accounts_filter: None,
     };
     let wsol_deepseekai_account_filter = AccountFilter {
         account: vec![],
@@ -72,6 +73,7 @@ async fn test_grpc() -> Result<(), Box<dyn std::error::Error>> {
                 data: Some(Data::Bytes(wsol_deepseekai.to_bytes().to_vec())),
             })),
         }],
+        cuckoo_accounts_filter: None,
     };
 
     // Event filtering

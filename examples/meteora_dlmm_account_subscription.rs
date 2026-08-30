@@ -57,6 +57,7 @@ async fn subscribe_meteora_dlmm_accounts() -> Result<(), Box<dyn std::error::Err
                 data: Some(Data::Bytes(discriminators::LB_PAIR.to_vec())),
             })),
         }],
+        cuckoo_accounts_filter: None,
     };
 
     // 创建 BinArrayBitmapExtension 账户过滤器
@@ -70,6 +71,7 @@ async fn subscribe_meteora_dlmm_accounts() -> Result<(), Box<dyn std::error::Err
                 data: Some(Data::Bytes(discriminators::BIN_ARRAY_BITMAP_EXTENSION.to_vec())),
             })),
         }],
+        cuckoo_accounts_filter: None,
     };
 
     // 交易过滤器（可选，如果只想订阅账户数据，可以留空）

@@ -43,8 +43,12 @@ async fn test_grpc() -> Result<(), Box<dyn std::error::Error>> {
     let account_to_listen = "use_your_token_account_here".to_string();
 
     // Listen to account data belonging to owner programs -> account event monitoring
-    let account_filter =
-        AccountFilter { account: vec![account_to_listen], owner: vec![], filters: vec![] };
+    let account_filter = AccountFilter {
+        account: vec![account_to_listen],
+        owner: vec![],
+        filters: vec![],
+        cuckoo_accounts_filter: None,
+    };
 
     // Event filtering
     let event_type_filter = Some(EventTypeFilter { include: vec![EventType::TokenAccount] });

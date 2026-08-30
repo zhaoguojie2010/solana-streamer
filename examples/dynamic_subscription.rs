@@ -51,7 +51,12 @@ async fn main() -> Result<()> {
         account_required: vec![],
     };
 
-    let account_filter = AccountFilter { account: vec![], owner: vec![], filters: vec![] };
+    let account_filter = AccountFilter {
+        account: vec![],
+        owner: vec![],
+        filters: vec![],
+        cuckoo_accounts_filter: None,
+    };
     let trade_event_filter = EventTypeFilter {
         include: vec![
             EventType::PumpFunBuy,
@@ -95,7 +100,12 @@ async fn main() -> Result<()> {
     if let Err(e) = client
         .update_subscription(
             vec![multi_protocol_filter],
-            vec![AccountFilter { account: vec![], owner: vec![], filters: vec![] }],
+            vec![AccountFilter {
+                account: vec![],
+                owner: vec![],
+                filters: vec![],
+                cuckoo_accounts_filter: None,
+            }],
         )
         .await
     {
@@ -121,7 +131,12 @@ async fn main() -> Result<()> {
     if let Err(e) = client
         .update_subscription(
             vec![raydium_cpmm_filter],
-            vec![AccountFilter { account: vec![], owner: vec![], filters: vec![] }],
+            vec![AccountFilter {
+                account: vec![],
+                owner: vec![],
+                filters: vec![],
+                cuckoo_accounts_filter: None,
+            }],
         )
         .await
     {
@@ -147,7 +162,12 @@ async fn main() -> Result<()> {
     if let Err(e) = client
         .update_subscription(
             vec![pumpfun_only_filter],
-            vec![AccountFilter { account: vec![], owner: vec![], filters: vec![] }],
+            vec![AccountFilter {
+                account: vec![],
+                owner: vec![],
+                filters: vec![],
+                cuckoo_accounts_filter: None,
+            }],
         )
         .await
     {
@@ -173,7 +193,12 @@ async fn main() -> Result<()> {
     if let Err(e) = client
         .update_subscription(
             vec![empty_filter],
-            vec![AccountFilter { account: vec![], owner: vec![], filters: vec![] }],
+            vec![AccountFilter {
+                account: vec![],
+                owner: vec![],
+                filters: vec![],
+                cuckoo_accounts_filter: None,
+            }],
         )
         .await
     {
@@ -205,7 +230,12 @@ async fn main() -> Result<()> {
     if let Err(e) = client
         .update_subscription(
             vec![silence_filter],
-            vec![AccountFilter { account: vec![], owner: vec![], filters: vec![] }],
+            vec![AccountFilter {
+                account: vec![],
+                owner: vec![],
+                filters: vec![],
+                cuckoo_accounts_filter: None,
+            }],
         )
         .await
     {
@@ -266,7 +296,12 @@ async fn main() -> Result<()> {
                 account_exclude: vec![],
                 account_required: vec![],
             }],
-            vec![AccountFilter { account: vec![], owner: vec![], filters: vec![] }],
+            vec![AccountFilter {
+                account: vec![],
+                owner: vec![],
+                filters: vec![],
+                cuckoo_accounts_filter: None,
+            }],
             None,
             None,
             shutdown_callback,
@@ -336,7 +371,12 @@ async fn main() -> Result<()> {
                 account_exclude: vec![],
                 account_required: vec![],
             }],
-            vec![AccountFilter { account: vec![], owner: vec![], filters: vec![] }],
+            vec![AccountFilter {
+                account: vec![],
+                owner: vec![],
+                filters: vec![],
+                cuckoo_accounts_filter: None,
+            }],
             None,
             None,
             test_callback,
@@ -368,7 +408,12 @@ async fn main() -> Result<()> {
                 account_exclude: vec![],
                 account_required: vec![],
             }],
-            vec![AccountFilter { account: vec![], owner: vec![], filters: vec![] }],
+            vec![AccountFilter {
+                account: vec![],
+                owner: vec![],
+                filters: vec![],
+                cuckoo_accounts_filter: None,
+            }],
             None,
             None,
             client2_callback,
@@ -402,7 +447,12 @@ async fn main() -> Result<()> {
                 account_exclude: vec![],
                 account_required: vec![],
             }],
-            vec![AccountFilter { account: vec![], owner: vec![], filters: vec![] }],
+            vec![AccountFilter {
+                account: vec![],
+                owner: vec![],
+                filters: vec![],
+                cuckoo_accounts_filter: None,
+            }],
             None,
             None,
             test_callback_advanced,
@@ -420,7 +470,12 @@ async fn main() -> Result<()> {
                         account_exclude: vec![],
                         account_required: vec![],
                     }],
-                    vec![AccountFilter { account: vec![], owner: vec![], filters: vec![] }],
+                    vec![AccountFilter {
+                        account: vec![],
+                        owner: vec![],
+                        filters: vec![],
+                        cuckoo_accounts_filter: None,
+                    }],
                     None,
                     None,
                     |_| {},
@@ -456,7 +511,12 @@ async fn main() -> Result<()> {
                 account_exclude: vec![],
                 account_required: vec![],
             }],
-            vec![AccountFilter { account: vec![], owner: vec![], filters: vec![] }],
+            vec![AccountFilter {
+                account: vec![],
+                owner: vec![],
+                filters: vec![],
+                cuckoo_accounts_filter: None,
+            }],
             None,
             None,
             client4_callback,

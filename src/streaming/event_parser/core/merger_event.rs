@@ -503,6 +503,24 @@ pub fn merge(instruction_event: &mut DexEvent, cpi_log_event: DexEvent) {
             }
             _ => {}
         },
+        DexEvent::MeteoraDammV2LiquidityChangeEvent(e) => match cpi_log_event {
+            DexEvent::MeteoraDammV2LiquidityChangeEvent(cpie) => {
+                e.pool = cpie.pool;
+                e.position = cpie.position;
+                e.owner = cpie.owner;
+                e.token_a_amount = cpie.token_a_amount;
+                e.token_b_amount = cpie.token_b_amount;
+                e.transfer_fee_included_token_a_amount = cpie.transfer_fee_included_token_a_amount;
+                e.transfer_fee_included_token_b_amount = cpie.transfer_fee_included_token_b_amount;
+                e.reserve_a_amount = cpie.reserve_a_amount;
+                e.reserve_b_amount = cpie.reserve_b_amount;
+                e.liquidity_delta = cpie.liquidity_delta;
+                e.token_a_amount_threshold = cpie.token_a_amount_threshold;
+                e.token_b_amount_threshold = cpie.token_b_amount_threshold;
+                e.change_type = cpie.change_type;
+            }
+            _ => {}
+        },
 
         _ => {}
     }

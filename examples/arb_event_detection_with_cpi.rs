@@ -86,7 +86,12 @@ async fn subscribe_arb_events() -> Result<(), Box<dyn std::error::Error>> {
         account_exclude: vec![],
         account_required: vec![],
     };
-    let account_filter = AccountFilter { account: vec![], owner: account_include, filters: vec![] };
+    let account_filter = AccountFilter {
+        account: vec![],
+        owner: account_include,
+        filters: vec![],
+        cuckoo_accounts_filter: None,
+    };
 
     let callback = create_arb_callback();
 

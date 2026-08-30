@@ -375,7 +375,30 @@ pub struct MeteoraDammV2InitializePoolWithDynamicConfigEvent {
     pub config: Pubkey,
 }
 
-/// Event discriminators
+/// Meteora DAMM v2 liquidity change event (add/remove/remove-all liquidity).
+///
+/// The reserve fields are the authoritative post-instruction pool reserves emitted by
+/// `EvtLiquidityChange`; consumers should not reconstruct them from transfer amounts.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, BorshDeserialize)]
+pub struct MeteoraDammV2LiquidityChangeEvent {
+    #[borsh(skip)]
+    pub metadata: EventMetadata,
+    pub pool: Pubkey,
+    pub position: Pubkey,
+    pub owner: Pubkey,
+    pub token_a_amount: u64,
+    pub token_b_amount: u64,
+    pub transfer_fee_included_token_a_amount: u64,
+    pub transfer_fee_included_token_b_amount: u64,
+    pub reserve_a_amount: u64,
+    pub reserve_b_amount: u64,
+    pub liquidity_delta: u128,
+    pub token_a_amount_threshold: u64,
+    pub token_b_amount_threshold: u64,
+    /// 0 = add liquidity, 1 = remove liquidity.
+    pub change_type: u8,
+}
+
 /// Meteora DAMM v2 pool 账户状态事件（由 gRPC account 订阅触发）。
 ///
 /// 只携带账户元数据与原始 data，由下游（solarb_bot）使用其权威的
@@ -404,6 +427,9 @@ pub mod discriminators {
     pub const INITIALIZE_POOL_IX: &[u8] = &[0x5f, 0xb4, 0x0a, 0xac, 0x54, 0xae, 0xe8, 0x28]; // initialize_pool
     pub const INITIALIZE_POOL_WITH_DYNAMIC_CONFIG_IX: &[u8] =
         &[0x95, 0x52, 0x48, 0xc5, 0xfd, 0xfc, 0x44, 0x0f]; // initialize_pool_with_dynamic_config
+    pub const ADD_LIQUIDITY_IX: &[u8] = &[0xb5, 0x9d, 0x59, 0x43, 0x8f, 0xb6, 0x34, 0x48]; // add_liquidity
+    pub const REMOVE_LIQUIDITY_IX: &[u8] = &[0x50, 0x55, 0xd1, 0x48, 0x18, 0xce, 0xb1, 0x6c]; // remove_liquidity
+    pub const REMOVE_ALL_LIQUIDITY_IX: &[u8] = &[0x0a, 0x33, 0x3d, 0x23, 0x70, 0x69, 0x18, 0x55]; // remove_all_liquidity
 
     // Account discriminators（账户 data 前 8 字节）
     pub const POOL_STATE_ACCOUNT: &[u8] = &[0xf1, 0x9a, 0x6d, 0x04, 0x11, 0xb1, 0x6d, 0xbc];
@@ -419,6 +445,10 @@ pub mod discriminators {
         0xe4, 0x45, 0xa5, 0x2e, 0x51, 0xcb, 0x9a, 0x1d, 0xe4, 0x32, 0xf6, 0x55, 0xcb, 0x42, 0x86,
         0x25,
     ]; // initialize pool event
+    pub const LIQUIDITY_CHANGE_EVENT: &[u8] = &[
+        0xe4, 0x45, 0xa5, 0x2e, 0x51, 0xcb, 0x9a, 0x1d, 0xc5, 0xab, 0x4e, 0x7f, 0xe0, 0xd3, 0x57,
+        0x0d,
+    ]; // EvtLiquidityChange
 }
 
 /// Decode swap event from CPI log
@@ -436,4 +466,18 @@ pub fn meteora_damm_v2_initialize_pool_event_decode(
     data: &[u8],
 ) -> Option<MeteoraDammV2InitializePoolEvent> {
     borsh::from_slice::<MeteoraDammV2InitializePoolEvent>(&data).ok()
+}
+
+/// Decode the stable prefix of `EvtLiquidityChange` from a CPI event.
+pub const METEORA_DAMM_V2_LIQUIDITY_CHANGE_EVENT_LOG_SIZE: usize = 177;
+pub fn meteora_damm_v2_liquidity_change_event_decode(
+    data: &[u8],
+) -> Option<MeteoraDammV2LiquidityChangeEvent> {
+    if data.len() < METEORA_DAMM_V2_LIQUIDITY_CHANGE_EVENT_LOG_SIZE {
+        return None;
+    }
+    borsh::from_slice::<MeteoraDammV2LiquidityChangeEvent>(
+        &data[..METEORA_DAMM_V2_LIQUIDITY_CHANGE_EVENT_LOG_SIZE],
+    )
+    .ok()
 }

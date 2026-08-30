@@ -45,6 +45,9 @@ pub fn parse_raydium_cpmm_instruction_data(
         }
         discriminators::DEPOSIT => parse_deposit_instruction(data, accounts, metadata),
         discriminators::INITIALIZE => parse_initialize_instruction(data, accounts, metadata),
+        discriminators::INITIALIZE_WITH_PERMISSION => {
+            parse_initialize_with_permission_instruction(data, accounts, metadata)
+        }
         discriminators::WITHDRAW => parse_withdraw_instruction(data, accounts, metadata),
         _ => None,
     }
@@ -137,6 +140,9 @@ fn parse_initialize_instruction(
         init_amount0: read_u64_le(data, 0)?,
         init_amount1: read_u64_le(data, 8)?,
         open_time: read_u64_le(data, 16)?,
+        creator_fee_on: 0,
+        enable_creator_fee: false,
+        payer: accounts[0],
         creator: accounts[0],
         amm_config: accounts[1],
         authority: accounts[2],
@@ -151,12 +157,61 @@ fn parse_initialize_instruction(
         token1_vault: accounts[11],
         create_pool_fee: accounts[12],
         observation_state: accounts[13],
+        permission: Pubkey::default(),
         token_program: accounts[14],
         token0_program: accounts[15],
         token1_program: accounts[16],
         associated_token_program: accounts[17],
         system_program: accounts[18],
         rent: accounts[19],
+    }))
+}
+
+/// Parse permissioned pool creation. Its account layout differs from legacy initialize
+/// because payer and pool creator are separate and the permission PDA is explicit.
+fn parse_initialize_with_permission_instruction(
+    data: &[u8],
+    accounts: &[Pubkey],
+    mut metadata: EventMetadata,
+) -> Option<DexEvent> {
+    metadata.event_type = EventType::RaydiumCpmmInitializeWithPermission;
+
+    if data.len() < 25 || accounts.len() < 21 {
+        return None;
+    }
+    let creator_fee_on = read_u8(data, 24)?;
+    if creator_fee_on > 2 {
+        return None;
+    }
+    Some(DexEvent::RaydiumCpmmInitializeEvent(RaydiumCpmmInitializeEvent {
+        metadata,
+        init_amount0: read_u64_le(data, 0)?,
+        init_amount1: read_u64_le(data, 8)?,
+        open_time: read_u64_le(data, 16)?,
+        creator_fee_on,
+        enable_creator_fee: true,
+        payer: accounts[0],
+        creator: accounts[1],
+        amm_config: accounts[2],
+        authority: accounts[3],
+        pool_state: accounts[4],
+        token0_mint: accounts[5],
+        token1_mint: accounts[6],
+        lp_mint: accounts[7],
+        creator_token0: accounts[8],
+        creator_token1: accounts[9],
+        creator_lp_token: accounts[10],
+        token0_vault: accounts[11],
+        token1_vault: accounts[12],
+        create_pool_fee: accounts[13],
+        observation_state: accounts[14],
+        permission: accounts[15],
+        token_program: accounts[16],
+        token0_program: accounts[17],
+        token1_program: accounts[18],
+        associated_token_program: accounts[19],
+        system_program: accounts[20],
+        rent: Pubkey::default(),
     }))
 }
 

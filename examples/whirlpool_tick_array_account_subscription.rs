@@ -35,6 +35,7 @@ async fn subscribe_whirlpool_tick_array_accounts() -> Result<(), Box<dyn std::er
         account: vec![],
         owner: vec![WHIRLPOOL_PROGRAM_ID.to_string()],
         filters: vec![],
+        cuckoo_accounts_filter: None,
     };
 
     let transaction_filter = TransactionFilter {

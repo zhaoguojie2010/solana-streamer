@@ -2,7 +2,8 @@ use crate::streaming::event_parser::{
     common::{read_u64_le, EventMetadata, EventType},
     protocols::meteora_dlmm::{
         discriminators, meteora_dlmm_swap2_event_decode, meteora_dlmm_swap_event_decode,
-        MeteoraDlmmSwap2Event, MeteoraDlmmSwapEvent,
+        MeteoraDlmmInstructionEvent, MeteoraDlmmInstructionKind, MeteoraDlmmSwap2Event,
+        MeteoraDlmmSwapEvent,
     },
     DexEvent,
 };
@@ -46,8 +47,94 @@ pub fn parse_meteora_dlmm_instruction_data(
         discriminators::SWAP_EXACT_OUT2_IX => {
             parse_swap_exact_out2_instruction(data, accounts, metadata)
         }
-        _ => None,
+        _ => parse_modeled_instruction(discriminator, data, accounts, metadata),
     }
+}
+
+fn parse_modeled_instruction(
+    discriminator: &[u8],
+    data: &[u8],
+    accounts: &[Pubkey],
+    metadata: EventMetadata,
+) -> Option<DexEvent> {
+    use MeteoraDlmmInstructionKind as Kind;
+    let kind = match discriminator {
+        discriminators::INITIALIZE_LB_PAIR_IX => Kind::InitializeLbPair,
+        discriminators::INITIALIZE_LB_PAIR2_IX => Kind::InitializeLbPair2,
+        discriminators::INITIALIZE_CUSTOMIZABLE_PERMISSIONLESS_LB_PAIR_IX => {
+            Kind::InitializeCustomizablePermissionlessLbPair
+        }
+        discriminators::INITIALIZE_CUSTOMIZABLE_PERMISSIONLESS_LB_PAIR2_IX => {
+            Kind::InitializeCustomizablePermissionlessLbPair2
+        }
+        discriminators::INITIALIZE_PERMISSION_LB_PAIR_IX => Kind::InitializePermissionLbPair,
+        discriminators::INITIALIZE_BIN_ARRAY_BITMAP_EXTENSION_IX => {
+            Kind::InitializeBinArrayBitmapExtension
+        }
+        discriminators::INITIALIZE_BIN_ARRAY_IX => Kind::InitializeBinArray,
+        discriminators::INITIALIZE_POSITION_IX => Kind::InitializePosition,
+        discriminators::INITIALIZE_POSITION2_IX => Kind::InitializePosition2,
+        discriminators::INITIALIZE_POSITION_PDA_IX => Kind::InitializePositionPda,
+        discriminators::INITIALIZE_POSITION_BY_OPERATOR_IX => Kind::InitializePositionByOperator,
+        discriminators::INCREASE_POSITION_LENGTH_IX => Kind::IncreasePositionLength,
+        discriminators::INCREASE_POSITION_LENGTH2_IX => Kind::IncreasePositionLength2,
+        discriminators::ADD_LIQUIDITY_IX => Kind::AddLiquidity,
+        discriminators::ADD_LIQUIDITY2_IX => Kind::AddLiquidity2,
+        discriminators::ADD_LIQUIDITY_BY_WEIGHT_IX => Kind::AddLiquidityByWeight,
+        discriminators::ADD_LIQUIDITY_BY_WEIGHT2_IX => Kind::AddLiquidityByWeight2,
+        discriminators::ADD_LIQUIDITY_BY_STRATEGY_IX => Kind::AddLiquidityByStrategy,
+        discriminators::ADD_LIQUIDITY_BY_STRATEGY2_IX => Kind::AddLiquidityByStrategy2,
+        discriminators::ADD_LIQUIDITY_BY_STRATEGY_ONE_SIDE_IX => {
+            Kind::AddLiquidityByStrategyOneSide
+        }
+        discriminators::ADD_LIQUIDITY_ONE_SIDE_IX => Kind::AddLiquidityOneSide,
+        discriminators::ADD_LIQUIDITY_ONE_SIDE_PRECISE_IX => Kind::AddLiquidityOneSidePrecise,
+        discriminators::ADD_LIQUIDITY_ONE_SIDE_PRECISE2_IX => Kind::AddLiquidityOneSidePrecise2,
+        discriminators::REMOVE_LIQUIDITY_IX => Kind::RemoveLiquidity,
+        discriminators::REMOVE_LIQUIDITY2_IX => Kind::RemoveLiquidity2,
+        discriminators::REMOVE_LIQUIDITY_BY_RANGE_IX => Kind::RemoveLiquidityByRange,
+        discriminators::REMOVE_LIQUIDITY_BY_RANGE2_IX => Kind::RemoveLiquidityByRange2,
+        discriminators::REMOVE_ALL_LIQUIDITY_IX => Kind::RemoveAllLiquidity,
+        discriminators::SET_ACTIVATION_POINT_IX => Kind::SetActivationPoint,
+        discriminators::SET_PAIR_STATUS_IX => Kind::SetPairStatus,
+        discriminators::SET_PAIR_STATUS_PERMISSIONLESS_IX => Kind::SetPairStatusPermissionless,
+        discriminators::UPDATE_BASE_FEE_PARAMETERS_IX => Kind::UpdateBaseFeeParameters,
+        discriminators::UPDATE_DYNAMIC_FEE_PARAMETERS_IX => Kind::UpdateDynamicFeeParameters,
+        discriminators::SWAP_EXACT_OUT_IX
+        | discriminators::SWAP_WITH_PRICE_IMPACT_IX
+        | discriminators::SWAP_WITH_PRICE_IMPACT2_IX => Kind::SwapStateChange,
+        discriminators::REBALANCE_LIQUIDITY_IX => Kind::RebalanceLiquidity,
+        discriminators::CLOSE_BIN_ARRAY_IX => Kind::CloseBinArray,
+        discriminators::SET_PRE_ACTIVATION_DURATION_IX => Kind::SetPreActivationDuration,
+        discriminators::SET_PRE_ACTIVATION_SWAP_ADDRESS_IX => Kind::SetPreActivationSwapAddress,
+        discriminators::UPDATE_FEES_AND_REWARDS_IX | discriminators::UPDATE_FEES_AND_REWARD2_IX => {
+            Kind::UpdateFeesAndRewards
+        }
+        discriminators::DECREASE_POSITION_LENGTH_IX => Kind::DecreasePositionLength,
+        discriminators::CLOSE_POSITION_IX
+        | discriminators::CLOSE_POSITION2_IX
+        | discriminators::CLOSE_POSITION_IF_EMPTY_IX => Kind::ClosePosition,
+        discriminators::CLAIM_FEE_IX
+        | discriminators::CLAIM_FEE2_IX
+        | discriminators::CLAIM_REWARD_IX
+        | discriminators::CLAIM_REWARD2_IX => Kind::ClaimFeeOrReward,
+        discriminators::INITIALIZE_REWARD_IX
+        | discriminators::FUND_REWARD_IX
+        | discriminators::UPDATE_REWARD_DURATION_IX
+        | discriminators::UPDATE_REWARD_FUNDER_IX
+        | discriminators::WITHDRAW_INELIGIBLE_REWARD_IX => Kind::RewardStateChange,
+        discriminators::WITHDRAW_PROTOCOL_FEE_IX => Kind::WithdrawProtocolFee,
+        discriminators::ZAP_PROTOCOL_FEE_IX => Kind::ZapProtocolFee,
+        discriminators::PLACE_LIMIT_ORDER_IX => Kind::PlaceLimitOrder,
+        discriminators::CANCEL_LIMIT_ORDER_IX => Kind::CancelLimitOrder,
+        _ => return None,
+    };
+    Some(DexEvent::MeteoraDlmmInstructionEvent(MeteoraDlmmInstructionEvent {
+        metadata,
+        kind,
+        accounts: accounts.to_vec(),
+        data: data.to_vec(),
+    }))
 }
 
 pub fn is_meteora_dlmm_swap_instruction(discriminator: &[u8]) -> bool {

@@ -13,7 +13,7 @@ use crate::streaming::event_parser::{
         merger_event::merge,
     },
     protocols::raydium_amm_v4::parser::RAYDIUM_AMM_V4_PROGRAM_ID,
-    DexEvent, Protocol, TxDexEvents, TxSwapKind,
+    DexEvent, Protocol, TxDexEvents, TxExecutionMetaAudit, TxSwapKind, TxTokenBalanceChange,
 };
 use parking_lot::Mutex;
 use prost_types::Timestamp;
@@ -34,7 +34,7 @@ const STABLECOIN_MINTS: &[Pubkey] = &[
     solana_sdk::pubkey!("So11111111111111111111111111111111111111112"), // WSOL
     solana_sdk::pubkey!("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"), // USDC
     solana_sdk::pubkey!("Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"), // USDT
-    solana_sdk::pubkey!("USDJ8ZpEwKSoaiTRbZLPSqVvvtRKUTHXFMTvkEBXcYh"),   // USD1
+    solana_sdk::pubkey!("USDJ8ZpEwKSoaiTRbZLPSqVvvtRKUTHXFMTvkEBXcYh"), // USD1
 ];
 const JITO_TIP_ACCOUNTS: &[Pubkey] = &[
     solana_sdk::pubkey!("96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5"),
@@ -192,8 +192,10 @@ impl EventParser {
         bot_wallet: Option<Pubkey>,
         transaction_index: Option<u64>,
         swap_cu_parse_config: Option<&SwapCuParseConfig>,
+        tx_exec_meta_audit: bool,
     ) -> anyhow::Result<Option<TxDexEvents>> {
         let has_jito_tip = Self::grpc_transaction_has_jito_tip(&grpc_tx);
+        let tx_exec_meta = tx_exec_meta_audit.then(|| Self::collect_tx_exec_meta(&grpc_tx));
         let events = Arc::new(Mutex::new(Vec::new()));
         let collected = events.clone();
         let callback = Arc::new(move |event: DexEvent| {
@@ -237,6 +239,7 @@ impl EventParser {
             compute_unit_limit,
             compute_unit_price_set,
             has_jito_tip,
+            tx_exec_meta,
             events,
         }))
     }
@@ -397,8 +400,91 @@ impl EventParser {
             compute_unit_limit,
             compute_unit_price_set,
             has_jito_tip,
+            tx_exec_meta: None,
             events,
         }))
+    }
+
+    fn collect_tx_exec_meta(grpc_tx: &SubscribeUpdateTransactionInfo) -> TxExecutionMetaAudit {
+        let mut audit = TxExecutionMetaAudit::default();
+        let Some(transaction) = grpc_tx.transaction.as_ref() else {
+            audit.parse_errors.push("transaction missing".to_string());
+            return audit;
+        };
+        let Some(message) = transaction.message.as_ref() else {
+            audit.parse_errors.push("transaction message missing".to_string());
+            return audit;
+        };
+        let Some(meta) = grpc_tx.meta.as_ref() else {
+            audit.parse_errors.push("transaction meta missing".to_string());
+            return audit;
+        };
+        let accounts = message
+            .account_keys
+            .iter()
+            .chain(meta.loaded_writable_addresses.iter())
+            .chain(meta.loaded_readonly_addresses.iter())
+            .map(|raw| Pubkey::try_from(raw.as_slice()).ok())
+            .collect::<Vec<_>>();
+        let mut indices = HashSet::new();
+        indices.extend(meta.pre_token_balances.iter().map(|balance| balance.account_index));
+        indices.extend(meta.post_token_balances.iter().map(|balance| balance.account_index));
+        for account_index in indices {
+            let pre = meta
+                .pre_token_balances
+                .iter()
+                .find(|balance| balance.account_index == account_index);
+            let post = meta
+                .post_token_balances
+                .iter()
+                .find(|balance| balance.account_index == account_index);
+            let template = post.or(pre);
+            let Some(template) = template else {
+                continue;
+            };
+            let parse_amount = |side: &str,
+                                balance: Option<
+                &yellowstone_grpc_proto::solana::storage::confirmed_block::TokenBalance,
+            >,
+                                errors: &mut Vec<String>|
+             -> Option<u64> {
+                let balance = balance?;
+                let Some(ui_amount) = balance.ui_token_amount.as_ref() else {
+                    errors.push(format!(
+                        "token balance ui amount missing: account_index={account_index} side={side}"
+                    ));
+                    return None;
+                };
+                let amount = ui_amount.amount.as_str();
+                match amount.parse::<u64>() {
+                    Ok(value) => Some(value),
+                    Err(error) => {
+                        errors.push(format!(
+                            "token balance amount parse failed: account_index={account_index} side={side} amount={amount} error={error}"
+                        ));
+                        None
+                    }
+                }
+            };
+            audit.token_balance_changes.push(TxTokenBalanceChange {
+                account_index,
+                account: accounts
+                    .get(usize::try_from(account_index).unwrap_or(usize::MAX))
+                    .copied()
+                    .flatten(),
+                mint: template.mint.clone(),
+                owner: template.owner.clone(),
+                program_id: template.program_id.clone(),
+                decimals: template
+                    .ui_token_amount
+                    .as_ref()
+                    .map(|amount| amount.decimals)
+                    .unwrap_or_default(),
+                pre_amount: parse_amount("pre", pre, &mut audit.parse_errors),
+                post_amount: parse_amount("post", post, &mut audit.parse_errors),
+            });
+        }
+        audit
     }
 
     fn grpc_transaction_has_jito_tip(grpc_tx: &SubscribeUpdateTransactionInfo) -> bool {
