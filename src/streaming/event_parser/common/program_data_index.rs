@@ -14,6 +14,8 @@ pub struct ProgramDataItem {
 pub struct ProgramDataIndex {
     pub outer: Vec<Option<ProgramDataItem>>,
     pub inner: Vec<Vec<Option<ProgramDataItem>>>,
+    pub outer_all: Vec<Vec<ProgramDataItem>>,
+    pub inner_all: Vec<Vec<Vec<ProgramDataItem>>>,
 }
 
 impl ProgramDataIndex {
@@ -30,6 +32,23 @@ impl ProgramDataIndex {
         }
         let outer = self.inner.get(outer_index as usize)?;
         outer.get(inner_index as usize)?.as_ref()
+    }
+
+    pub fn get_outer_all(&self, outer_index: i64) -> &[ProgramDataItem] {
+        usize::try_from(outer_index)
+            .ok()
+            .and_then(|index| self.outer_all.get(index))
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+    }
+
+    pub fn get_inner_all(&self, outer_index: i64, inner_index: i64) -> &[ProgramDataItem] {
+        usize::try_from(outer_index)
+            .ok()
+            .and_then(|outer| self.inner_all.get(outer))
+            .and_then(|items| usize::try_from(inner_index).ok().and_then(|inner| items.get(inner)))
+            .map(Vec::as_slice)
+            .unwrap_or_default()
     }
 }
 
@@ -122,18 +141,45 @@ fn find_program_data_in_span(
     None
 }
 
+fn find_all_program_data_in_span(
+    span: &InvocationSpan,
+    spans: &[InvocationSpan],
+    logs: &[String],
+) -> Vec<ProgramDataItem> {
+    if logs.is_empty() || span.start >= logs.len() {
+        return Vec::new();
+    }
+    let end = span.end.min(logs.len() - 1);
+    (span.start..=end)
+        .filter(|idx| !is_within_child_span(*idx, span, spans))
+        .filter_map(|idx| {
+            extract_program_data(&logs[idx]).map(|base64| ProgramDataItem {
+                base64: base64.to_string(),
+                program_id: span.program_id,
+                depth: span.depth,
+                log_index: idx,
+            })
+        })
+        .collect()
+}
+
 pub fn build_program_data_index(
     logs: &[String],
     outer_len: usize,
     inner_instructions: &[yellowstone_grpc_proto::prelude::InnerInstructions],
 ) -> ProgramDataIndex {
-    let mut index =
-        ProgramDataIndex { outer: vec![None; outer_len], inner: vec![Vec::new(); outer_len] };
+    let mut index = ProgramDataIndex {
+        outer: vec![None; outer_len],
+        inner: vec![Vec::new(); outer_len],
+        outer_all: vec![Vec::new(); outer_len],
+        inner_all: vec![Vec::new(); outer_len],
+    };
 
     for inner in inner_instructions.iter() {
         let outer_idx = inner.index as usize;
         if outer_idx < outer_len {
             index.inner[outer_idx] = vec![None; inner.instructions.len()];
+            index.inner_all[outer_idx] = vec![Vec::new(); inner.instructions.len()];
         }
     }
 
@@ -149,6 +195,7 @@ pub fn build_program_data_index(
             continue;
         };
         index.outer[outer_idx] = find_program_data_in_span(outer_span, &spans, logs);
+        index.outer_all[outer_idx] = find_all_program_data_in_span(outer_span, &spans, logs);
 
         if index.inner[outer_idx].is_empty() {
             continue;
@@ -165,6 +212,8 @@ pub fn build_program_data_index(
             if let Some(inner_span) = inner_spans.get(inner_idx).copied() {
                 index.inner[outer_idx][inner_idx] =
                     find_program_data_in_span(inner_span, &spans, logs);
+                index.inner_all[outer_idx][inner_idx] =
+                    find_all_program_data_in_span(inner_span, &spans, logs);
             }
         }
     }

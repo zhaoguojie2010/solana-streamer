@@ -132,6 +132,7 @@ pub enum DexEvent {
     // Raydium CLMM events
     RaydiumClmmSwapEvent(RaydiumClmmSwapEvent),
     RaydiumClmmSwapV2Event(RaydiumClmmSwapV2Event),
+    RaydiumClmmInstructionEvent(RaydiumClmmInstructionEvent),
     RaydiumClmmClosePositionEvent(RaydiumClmmClosePositionEvent),
     RaydiumClmmIncreaseLiquidityV2Event(RaydiumClmmIncreaseLiquidityV2Event),
     RaydiumClmmDecreaseLiquidityV2Event(RaydiumClmmDecreaseLiquidityV2Event),
@@ -175,6 +176,7 @@ pub enum DexEvent {
     // Whirlpool events
     WhirlpoolSwapEvent(WhirlpoolSwapEvent),
     WhirlpoolSwapV2Event(WhirlpoolSwapV2Event),
+    WhirlpoolInstructionEvent(WhirlpoolInstructionEvent),
     WhirlpoolAccountEvent(WhirlpoolAccountEvent),
     WhirlpoolTickArrayAccountEvent(WhirlpoolTickArrayAccountEvent),
 
@@ -225,6 +227,7 @@ impl DexEvent {
             DexEvent::RaydiumAmmV4AmmInfoAccountEvent(e) => &e.metadata,
             DexEvent::RaydiumClmmSwapEvent(e) => &e.metadata,
             DexEvent::RaydiumClmmSwapV2Event(e) => &e.metadata,
+            DexEvent::RaydiumClmmInstructionEvent(e) => &e.metadata,
             DexEvent::RaydiumClmmClosePositionEvent(e) => &e.metadata,
             DexEvent::RaydiumClmmIncreaseLiquidityV2Event(e) => &e.metadata,
             DexEvent::RaydiumClmmDecreaseLiquidityV2Event(e) => &e.metadata,
@@ -256,6 +259,7 @@ impl DexEvent {
             DexEvent::MeteoraDlmmBinArrayBitmapExtensionAccountEvent(e) => &e.metadata,
             DexEvent::WhirlpoolSwapEvent(e) => &e.metadata,
             DexEvent::WhirlpoolSwapV2Event(e) => &e.metadata,
+            DexEvent::WhirlpoolInstructionEvent(e) => &e.metadata,
             DexEvent::WhirlpoolAccountEvent(e) => &e.metadata,
             DexEvent::WhirlpoolTickArrayAccountEvent(e) => &e.metadata,
             DexEvent::TokenAccountEvent(e) => &e.metadata,
@@ -304,6 +308,7 @@ impl DexEvent {
             DexEvent::RaydiumAmmV4AmmInfoAccountEvent(e) => &mut e.metadata,
             DexEvent::RaydiumClmmSwapEvent(e) => &mut e.metadata,
             DexEvent::RaydiumClmmSwapV2Event(e) => &mut e.metadata,
+            DexEvent::RaydiumClmmInstructionEvent(e) => &mut e.metadata,
             DexEvent::RaydiumClmmClosePositionEvent(e) => &mut e.metadata,
             DexEvent::RaydiumClmmIncreaseLiquidityV2Event(e) => &mut e.metadata,
             DexEvent::RaydiumClmmDecreaseLiquidityV2Event(e) => &mut e.metadata,
@@ -335,6 +340,7 @@ impl DexEvent {
             DexEvent::MeteoraDlmmBinArrayBitmapExtensionAccountEvent(e) => &mut e.metadata,
             DexEvent::WhirlpoolSwapEvent(e) => &mut e.metadata,
             DexEvent::WhirlpoolSwapV2Event(e) => &mut e.metadata,
+            DexEvent::WhirlpoolInstructionEvent(e) => &mut e.metadata,
             DexEvent::WhirlpoolAccountEvent(e) => &mut e.metadata,
             DexEvent::WhirlpoolTickArrayAccountEvent(e) => &mut e.metadata,
             DexEvent::TokenAccountEvent(e) => &mut e.metadata,

@@ -5,9 +5,10 @@ use crate::streaming::event_parser::{
     },
     protocols::raydium_clmm::{
         discriminators, RaydiumClmmClosePositionEvent, RaydiumClmmCreatePoolEvent,
-        RaydiumClmmDecreaseLiquidityV2Event, RaydiumClmmIncreaseLiquidityV2Event,
-        RaydiumClmmOpenPositionV2Event, RaydiumClmmOpenPositionWithToken22NftEvent,
-        RaydiumClmmSwapEvent, RaydiumClmmSwapV2Event,
+        RaydiumClmmDecreaseLiquidityV2Event, RaydiumClmmExecutionEvent,
+        RaydiumClmmIncreaseLiquidityV2Event, RaydiumClmmInstructionEvent,
+        RaydiumClmmInstructionKind, RaydiumClmmOpenPositionV2Event,
+        RaydiumClmmOpenPositionWithToken22NftEvent, RaydiumClmmSwapEvent, RaydiumClmmSwapV2Event,
     },
     DexEvent,
 };
@@ -46,24 +47,64 @@ pub fn parse_raydium_clmm_instruction_data(
     match discriminator {
         discriminators::SWAP => parse_swap_instruction(data, accounts, metadata),
         discriminators::SWAP_V2 => parse_swap_v2_instruction(data, accounts, metadata),
-        discriminators::CLOSE_POSITION => {
-            parse_close_position_instruction(data, accounts, metadata)
-        }
-        discriminators::DECREASE_LIQUIDITY_V2 => {
-            parse_decrease_liquidity_v2_instruction(data, accounts, metadata)
-        }
-        discriminators::CREATE_POOL => parse_create_pool_instruction(data, accounts, metadata),
-        discriminators::INCREASE_LIQUIDITY_V2 => {
-            parse_increase_liquidity_v2_instruction(data, accounts, metadata)
-        }
-        discriminators::OPEN_POSITION_WITH_TOKEN_22_NFT => {
-            parse_open_position_with_token_22_nft_instruction(data, accounts, metadata)
-        }
-        discriminators::OPEN_POSITION_V2 => {
-            parse_open_position_v2_instruction(data, accounts, metadata)
-        }
-        _ => None,
+        _ => parse_modeled_instruction(discriminator, data, accounts, metadata),
     }
+}
+
+fn parse_modeled_instruction(
+    discriminator: &[u8],
+    data: &[u8],
+    accounts: &[Pubkey],
+    mut metadata: EventMetadata,
+) -> Option<DexEvent> {
+    use RaydiumClmmInstructionKind as Kind;
+    let kind = match discriminator {
+        discriminators::CREATE_AMM_CONFIG => Kind::CreateAmmConfig,
+        discriminators::CREATE_SUPPORT_MINT_ASSOCIATED => Kind::CreateSupportMintAssociated,
+        discriminators::UPDATE_AMM_CONFIG => Kind::UpdateAmmConfig,
+        discriminators::CREATE_DYNAMIC_FEE_CONFIG => Kind::CreateDynamicFeeConfig,
+        discriminators::UPDATE_DYNAMIC_FEE_CONFIG => Kind::UpdateDynamicFeeConfig,
+        discriminators::CREATE_PERMISSION_PDA => Kind::CreatePermissionPda,
+        discriminators::CLOSE_PERMISSION_PDA => Kind::ClosePermissionPda,
+        discriminators::CLOSE_SUPPORT_MINT_ASSOCIATED => Kind::CloseSupportMintAssociated,
+        discriminators::CREATE_POOL => Kind::CreatePool,
+        discriminators::CREATE_CUSTOMIZABLE_POOL => Kind::CreateCustomizablePool,
+        discriminators::CREATE_PERMISSIONED_POOL => Kind::CreatePermissionedPool,
+        discriminators::UPDATE_POOL_STATUS => Kind::UpdatePoolStatus,
+        discriminators::CREATE_OPERATION_ACCOUNT => Kind::CreateOperationAccount,
+        discriminators::UPDATE_OPERATION_ACCOUNT => Kind::UpdateOperationAccount,
+        discriminators::TRANSFER_REWARD_OWNER => Kind::TransferRewardOwner,
+        discriminators::INITIALIZE_REWARD => Kind::InitializeReward,
+        discriminators::COLLECT_REMAINING_REWARDS => Kind::CollectRemainingRewards,
+        discriminators::UPDATE_REWARD_INFOS => Kind::UpdateRewardInfos,
+        discriminators::SET_REWARD_PARAMS => Kind::SetRewardParams,
+        discriminators::COLLECT_PROTOCOL_FEE => Kind::CollectProtocolFee,
+        discriminators::COLLECT_FUND_FEE => Kind::CollectFundFee,
+        discriminators::OPEN_POSITION => Kind::OpenPosition,
+        discriminators::OPEN_POSITION_V2 => Kind::OpenPositionV2,
+        discriminators::OPEN_POSITION_WITH_TOKEN_22_NFT => Kind::OpenPositionWithToken22Nft,
+        discriminators::CLOSE_POSITION => Kind::ClosePosition,
+        discriminators::INCREASE_LIQUIDITY => Kind::IncreaseLiquidity,
+        discriminators::INCREASE_LIQUIDITY_V2 => Kind::IncreaseLiquidityV2,
+        discriminators::DECREASE_LIQUIDITY => Kind::DecreaseLiquidity,
+        discriminators::DECREASE_LIQUIDITY_V2 => Kind::DecreaseLiquidityV2,
+        discriminators::SWAP_ROUTER_BASE_IN => Kind::SwapRouterBaseIn,
+        discriminators::CLOSE_PROTOCOL_POSITION => Kind::CloseProtocolPosition,
+        discriminators::OPEN_LIMIT_ORDER => Kind::OpenLimitOrder,
+        discriminators::INCREASE_LIMIT_ORDER => Kind::IncreaseLimitOrder,
+        discriminators::DECREASE_LIMIT_ORDER => Kind::DecreaseLimitOrder,
+        discriminators::SETTLE_LIMIT_ORDER => Kind::SettleLimitOrder,
+        discriminators::CLOSE_LIMIT_ORDER => Kind::CloseLimitOrder,
+        _ => return None,
+    };
+    metadata.event_type = EventType::RaydiumClmmInstruction;
+    Some(DexEvent::RaydiumClmmInstructionEvent(RaydiumClmmInstructionEvent {
+        metadata,
+        kind,
+        accounts: accounts.to_vec(),
+        data: data.to_vec(),
+        execution_events: Vec::new(),
+    }))
 }
 
 pub fn is_raydium_clmm_swap_instruction(discriminator: &[u8]) -> bool {
@@ -107,6 +148,7 @@ pub fn parse_raydium_clmm_account_data(
 }
 
 /// 解析打开仓位V2指令事件
+#[allow(dead_code)] // Kept for downstream compatibility while unified instruction events are emitted.
 fn parse_open_position_v2_instruction(
     data: &[u8],
     accounts: &[Pubkey],
@@ -155,6 +197,7 @@ fn parse_open_position_v2_instruction(
 }
 
 /// 解析打开仓位v2指令事件
+#[allow(dead_code)]
 fn parse_open_position_with_token_22_nft_instruction(
     data: &[u8],
     accounts: &[Pubkey],
@@ -202,6 +245,7 @@ fn parse_open_position_with_token_22_nft_instruction(
 }
 
 /// 解析增加流动性v2指令事件
+#[allow(dead_code)]
 fn parse_increase_liquidity_v2_instruction(
     data: &[u8],
     accounts: &[Pubkey],
@@ -237,6 +281,7 @@ fn parse_increase_liquidity_v2_instruction(
 }
 
 /// 解析创建池指令事件
+#[allow(dead_code)]
 fn parse_create_pool_instruction(
     data: &[u8],
     accounts: &[Pubkey],
@@ -268,6 +313,7 @@ fn parse_create_pool_instruction(
 }
 
 /// 解析减少流动性v2指令事件
+#[allow(dead_code)]
 fn parse_decrease_liquidity_v2_instruction(
     data: &[u8],
     accounts: &[Pubkey],
@@ -304,6 +350,7 @@ fn parse_decrease_liquidity_v2_instruction(
 }
 
 /// 解析关闭仓位指令事件
+#[allow(dead_code)]
 fn parse_close_position_instruction(
     _data: &[u8],
     accounts: &[Pubkey],
@@ -459,6 +506,63 @@ pub fn parse_swap_event_from_log(log_data_base64: &str) -> Option<SwapEventLogDa
         sqrt_price_x64,
         liquidity,
         tick,
+    })
+}
+
+/// Decode state-changing Anchor events used by the pending CLMM shadow. Unknown events are
+/// ignored; malformed known events fail parsing instead of producing a partial state delta.
+pub fn parse_execution_event_from_program_data(
+    item: &ProgramDataItem,
+) -> Option<RaydiumClmmExecutionEvent> {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    if item.program_id != RAYDIUM_CLMM_PROGRAM_ID {
+        return None;
+    }
+    let bytes = STANDARD.decode(&item.base64).ok()?;
+    let discriminator = bytes.get(..8)?;
+    let data = bytes.get(8..)?;
+    let pubkey = |offset: usize| Pubkey::try_from(data.get(offset..offset + 32)?).ok();
+    let u64_at = |offset: usize| read_u64_le(data, offset);
+    let u128_at = |offset: usize| read_u128_le(data, offset);
+    let i32_at = |offset: usize| read_i32_le(data, offset);
+
+    if discriminator == [126, 240, 175, 206, 158, 88, 153, 107] {
+        return Some(RaydiumClmmExecutionEvent::LiquidityChange {
+            pool_state: pubkey(0)?,
+            tick: i32_at(32)?,
+            tick_lower: i32_at(36)?,
+            tick_upper: i32_at(40)?,
+            liquidity_before: u128_at(44)?,
+            liquidity_after: u128_at(60)?,
+        });
+    }
+    if discriminator == discriminators::SWAP_EVENT {
+        let event = parse_swap_event_from_log(&item.base64)?;
+        return Some(RaydiumClmmExecutionEvent::Swap {
+            pool_state: event.pool_state,
+            zero_for_one: event.zero_for_one,
+            amount_0: event.amount_0,
+            amount_1: event.amount_1,
+            sqrt_price_x64: event.sqrt_price_x64,
+            liquidity: event.liquidity,
+            tick: event.tick,
+        });
+    }
+    let (kind, filled_offset) = match discriminator {
+        [106, 24, 71, 85, 57, 169, 158, 216] => (0u8, None),
+        [11, 120, 13, 204, 199, 87, 19, 200] => (1, None),
+        [88, 119, 77, 164, 125, 124, 10, 194] => (2, Some(77)),
+        [70, 48, 40, 221, 219, 237, 212, 163] => (3, Some(77)),
+        _ => return None,
+    };
+    let _ = kind;
+    Some(RaydiumClmmExecutionEvent::LimitOrder {
+        pool_state: pubkey(0)?,
+        limit_order: pubkey(32)?,
+        zero_for_one: *data.get(64)? != 0,
+        tick: i32_at(65)?,
+        total_amount: u64_at(69)?,
+        filled_amount: filled_offset.and_then(|offset| u64_at(offset)).unwrap_or(0),
     })
 }
 

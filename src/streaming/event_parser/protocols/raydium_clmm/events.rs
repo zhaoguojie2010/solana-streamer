@@ -6,6 +6,89 @@ use crate::streaming::event_parser::protocols::raydium_clmm::types::{
 use serde::{Deserialize, Serialize};
 use solana_sdk::pubkey::Pubkey;
 
+/// Ordered Raydium CLMM instruction retained for transaction-level shadow replay.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RaydiumClmmInstructionKind {
+    CreateAmmConfig,
+    CreateSupportMintAssociated,
+    UpdateAmmConfig,
+    CreateDynamicFeeConfig,
+    UpdateDynamicFeeConfig,
+    CreatePermissionPda,
+    ClosePermissionPda,
+    CloseSupportMintAssociated,
+    CreatePool,
+    CreateCustomizablePool,
+    CreatePermissionedPool,
+    UpdatePoolStatus,
+    CreateOperationAccount,
+    UpdateOperationAccount,
+    TransferRewardOwner,
+    InitializeReward,
+    CollectRemainingRewards,
+    UpdateRewardInfos,
+    SetRewardParams,
+    CollectProtocolFee,
+    CollectFundFee,
+    OpenPosition,
+    OpenPositionV2,
+    OpenPositionWithToken22Nft,
+    ClosePosition,
+    IncreaseLiquidity,
+    IncreaseLiquidityV2,
+    DecreaseLiquidity,
+    DecreaseLiquidityV2,
+    SwapRouterBaseIn,
+    CloseProtocolPosition,
+    OpenLimitOrder,
+    IncreaseLimitOrder,
+    DecreaseLimitOrder,
+    SettleLimitOrder,
+    CloseLimitOrder,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RaydiumClmmInstructionEvent {
+    pub metadata: EventMetadata,
+    pub kind: RaydiumClmmInstructionKind,
+    pub accounts: Vec<Pubkey>,
+    /// Anchor instruction payload after the 8-byte discriminator.
+    pub data: Vec<u8>,
+    /// Ordered Anchor events emitted while this instruction executed. Router instructions can
+    /// emit multiple swaps, so this intentionally remains a vector.
+    #[serde(default)]
+    pub execution_events: Vec<RaydiumClmmExecutionEvent>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RaydiumClmmExecutionEvent {
+    Swap {
+        pool_state: Pubkey,
+        zero_for_one: bool,
+        amount_0: u64,
+        amount_1: u64,
+        sqrt_price_x64: u128,
+        liquidity: u128,
+        tick: i32,
+    },
+    LiquidityChange {
+        pool_state: Pubkey,
+        tick: i32,
+        tick_lower: i32,
+        tick_upper: i32,
+        liquidity_before: u128,
+        liquidity_after: u128,
+    },
+    LimitOrder {
+        pool_state: Pubkey,
+        limit_order: Pubkey,
+        zero_for_one: bool,
+        tick: i32,
+        total_amount: u64,
+        filled_amount: u64,
+    },
+}
+
 /// 交易
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RaydiumClmmSwapEvent {
@@ -293,6 +376,37 @@ pub struct RaydiumClmmTickArrayBitmapExtensionAccountEvent {
 /// 事件鉴别器常量
 pub mod discriminators {
     // 指令鉴别器
+    pub const CREATE_AMM_CONFIG: &[u8] = &[137, 52, 237, 212, 215, 117, 108, 104];
+    pub const CREATE_SUPPORT_MINT_ASSOCIATED: &[u8] = &[17, 251, 65, 92, 136, 242, 14, 169];
+    pub const UPDATE_AMM_CONFIG: &[u8] = &[49, 60, 174, 136, 154, 28, 116, 200];
+    pub const CREATE_DYNAMIC_FEE_CONFIG: &[u8] = &[189, 14, 181, 120, 85, 118, 227, 62];
+    pub const UPDATE_DYNAMIC_FEE_CONFIG: &[u8] = &[7, 7, 80, 8, 2, 199, 132, 240];
+    pub const CREATE_PERMISSION_PDA: &[u8] = &[135, 136, 2, 216, 137, 169, 181, 202];
+    pub const CLOSE_PERMISSION_PDA: &[u8] = &[156, 84, 32, 118, 69, 135, 70, 123];
+    pub const CLOSE_SUPPORT_MINT_ASSOCIATED: &[u8] = &[96, 136, 183, 99, 72, 152, 54, 131];
+    pub const CREATE_CUSTOMIZABLE_POOL: &[u8] = &[43, 68, 212, 167, 89, 47, 164, 1];
+    pub const CREATE_PERMISSIONED_POOL: &[u8] = &[36, 243, 179, 35, 42, 239, 53, 229];
+    pub const UPDATE_POOL_STATUS: &[u8] = &[130, 87, 108, 6, 46, 224, 117, 123];
+    pub const CREATE_OPERATION_ACCOUNT: &[u8] = &[63, 87, 148, 33, 109, 35, 8, 104];
+    pub const UPDATE_OPERATION_ACCOUNT: &[u8] = &[127, 70, 119, 40, 188, 227, 61, 7];
+    pub const TRANSFER_REWARD_OWNER: &[u8] = &[7, 22, 12, 83, 242, 43, 48, 121];
+    pub const INITIALIZE_REWARD: &[u8] = &[95, 135, 192, 196, 242, 129, 230, 68];
+    pub const COLLECT_REMAINING_REWARDS: &[u8] = &[18, 237, 166, 197, 34, 16, 213, 144];
+    pub const UPDATE_REWARD_INFOS: &[u8] = &[163, 172, 224, 52, 11, 154, 106, 223];
+    pub const SET_REWARD_PARAMS: &[u8] = &[112, 52, 167, 75, 32, 201, 211, 137];
+    pub const COLLECT_PROTOCOL_FEE: &[u8] = &[136, 136, 252, 221, 194, 66, 126, 89];
+    pub const COLLECT_FUND_FEE: &[u8] = &[167, 138, 78, 149, 223, 194, 6, 126];
+    pub const OPEN_POSITION: &[u8] = &[135, 128, 47, 77, 15, 152, 240, 49];
+    pub const INCREASE_LIQUIDITY: &[u8] = &[46, 156, 243, 118, 13, 205, 251, 178];
+    pub const DECREASE_LIQUIDITY: &[u8] = &[160, 38, 208, 111, 104, 91, 44, 1];
+    pub const SWAP_ROUTER_BASE_IN: &[u8] = &[69, 125, 115, 218, 245, 186, 242, 196];
+    pub const CLOSE_PROTOCOL_POSITION: &[u8] = &[201, 117, 152, 144, 85, 85, 108, 178];
+    pub const OPEN_LIMIT_ORDER: &[u8] = &[157, 32, 218, 183, 71, 29, 18, 147];
+    pub const INCREASE_LIMIT_ORDER: &[u8] = &[177, 144, 89, 236, 250, 186, 125, 99];
+    pub const DECREASE_LIMIT_ORDER: &[u8] = &[117, 157, 60, 103, 66, 49, 163, 0];
+    pub const SETTLE_LIMIT_ORDER: &[u8] = &[205, 78, 116, 33, 92, 105, 26, 96];
+    pub const CLOSE_LIMIT_ORDER: &[u8] = &[76, 124, 128, 15, 213, 87, 37, 250];
+
     pub const SWAP: &[u8] = &[248, 198, 158, 145, 225, 117, 135, 200];
     pub const SWAP_V2: &[u8] = &[43, 4, 237, 11, 26, 201, 30, 98];
     pub const CLOSE_POSITION: &[u8] = &[123, 134, 81, 0, 49, 68, 98, 98];

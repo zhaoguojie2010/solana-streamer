@@ -157,7 +157,11 @@ pub struct TickState {
     pub fee_growth_outside0_x64: u128,
     pub fee_growth_outside1_x64: u128,
     pub reward_growths_outside_x64: [u128; 3],
-    pub padding: [u32; 13],
+    pub order_phase: u64,
+    pub orders_amount: u64,
+    pub part_filled_orders_remaining: u64,
+    pub unfilled_ratio_x64: u128,
+    pub padding: [u32; 3],
 }
 
 impl Default for TickState {
@@ -169,7 +173,11 @@ impl Default for TickState {
             fee_growth_outside0_x64: 0,
             fee_growth_outside1_x64: 0,
             reward_growths_outside_x64: [0; 3],
-            padding: [0; 13],
+            order_phase: 0,
+            orders_amount: 0,
+            part_filled_orders_remaining: 0,
+            unfilled_ratio_x64: 0,
+            padding: [0; 3],
         }
     }
 }

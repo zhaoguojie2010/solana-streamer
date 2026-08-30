@@ -3,6 +3,40 @@ use crate::streaming::event_parser::protocols::whirlpool::types::{Whirlpool, Whi
 use serde::{Deserialize, Serialize};
 use solana_sdk::pubkey::Pubkey;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WhirlpoolInstructionKind {
+    InitializePool, InitializePoolV2, InitializePoolWithAdaptiveFee,
+    InitializeTickArray, InitializeDynamicTickArray,
+    OpenPosition, OpenPositionWithMetadata, OpenPositionWithTokenExtensions, OpenBundledPosition,
+    IncreaseLiquidity, IncreaseLiquidityV2, DecreaseLiquidity, DecreaseLiquidityV2,
+    RepositionLiquidityV2, TwoHopSwap, TwoHopSwapV2, SetFeeRate, SetProtocolFeeRate,
+    Other([u8; 8]),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WhirlpoolInstructionEvent {
+    pub metadata: EventMetadata,
+    pub kind: WhirlpoolInstructionKind,
+    pub accounts: Vec<Pubkey>,
+    pub data: Vec<u8>,
+    #[serde(default)]
+    pub execution_events: Vec<WhirlpoolExecutionEvent>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WhirlpoolExecutionEvent {
+    PoolInitialized { whirlpool: Pubkey, config: Pubkey, mint_a: Pubkey, mint_b: Pubkey,
+        tick_spacing: u16, token_program_a: Pubkey, token_program_b: Pubkey, decimals_a: u8,
+        decimals_b: u8, initial_sqrt_price: u128 },
+    PositionOpened { whirlpool: Pubkey, position: Pubkey, tick_lower: i32, tick_upper: i32 },
+    LiquidityChanged { whirlpool: Pubkey, position: Pubkey, tick_lower: i32, tick_upper: i32,
+        liquidity: u128, increasing: bool },
+    LiquidityRepositioned { whirlpool: Pubkey, position: Pubkey, old_lower: i32, old_upper: i32,
+        new_lower: i32, new_upper: i32, old_liquidity: u128, new_liquidity: u128 },
+    Traded { whirlpool: Pubkey, a_to_b: bool, pre_sqrt_price: u128, post_sqrt_price: u128,
+        input_amount: u64, output_amount: u64, lp_fee: u64, protocol_fee: u64 },
+}
+
 /// Whirlpool Swap 事件
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WhirlpoolSwapEvent {

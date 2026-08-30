@@ -1557,16 +1557,16 @@ fn enrich_event_from_program_data(
         return;
     };
 
-    let item = if let Some(inner_index) = inner_index {
-        index.get_inner(outer_index, inner_index)
+    let items = if let Some(inner_index) = inner_index {
+        index.get_inner_all(outer_index, inner_index)
     } else {
-        index.get_outer(outer_index)
+        index.get_outer_all(outer_index)
     };
-
-    let Some(item) = item else {
+    if items.is_empty() {
         return;
-    };
+    }
 
+    for item in items {
     match protocol {
         Protocol::PancakeSwap => {
             use crate::streaming::event_parser::protocols::pancakeswap::parser::parse_swap_event_from_program_data;
@@ -1630,8 +1630,13 @@ fn enrich_event_from_program_data(
             }
         }
         Protocol::RaydiumClmm => {
-            use crate::streaming::event_parser::protocols::raydium_clmm::parser::parse_swap_event_from_program_data;
+            use crate::streaming::event_parser::protocols::raydium_clmm::parser::{parse_execution_event_from_program_data, parse_swap_event_from_program_data};
             match event {
+                DexEvent::RaydiumClmmInstructionEvent(instruction) => {
+                    if let Some(execution) = parse_execution_event_from_program_data(item) {
+                        instruction.execution_events.push(execution);
+                    }
+                }
                 DexEvent::RaydiumClmmSwapEvent(swap_event) => {
                     if let Some(log_data) =
                         parse_swap_event_from_program_data(item, &swap_event.pool_state)
@@ -1670,8 +1675,13 @@ fn enrich_event_from_program_data(
             }
         }
         Protocol::Whirlpool => {
-            use crate::streaming::event_parser::protocols::whirlpool::parser::parse_traded_event_from_program_data;
+            use crate::streaming::event_parser::protocols::whirlpool::parser::{parse_execution_event_from_program_data, parse_traded_event_from_program_data};
             match event {
+                DexEvent::WhirlpoolInstructionEvent(instruction) => {
+                    if let Some(execution) = parse_execution_event_from_program_data(item) {
+                        instruction.execution_events.push(execution);
+                    }
+                }
                 DexEvent::WhirlpoolSwapEvent(swap_event) => {
                     if let Some(log_data) =
                         parse_traded_event_from_program_data(item, &swap_event.whirlpool)
@@ -1706,5 +1716,6 @@ fn enrich_event_from_program_data(
             }
         }
         _ => {}
+    }
     }
 }

@@ -114,6 +114,7 @@ pub enum EventType {
     // Raydium CLMM events
     RaydiumClmmSwap,
     RaydiumClmmSwapV2,
+    RaydiumClmmInstruction,
     RaydiumClmmClosePosition,
     RaydiumClmmIncreaseLiquidityV2,
     RaydiumClmmDecreaseLiquidityV2,
@@ -145,6 +146,7 @@ pub enum EventType {
     // Whirlpool events
     WhirlpoolSwap,
     WhirlpoolSwapV2,
+    WhirlpoolInstruction,
 
     // Account events
     AccountRaydiumAmmV4AmmInfo,
@@ -248,6 +250,7 @@ impl fmt::Display for EventType {
             EventType::RaydiumCpmmWithdraw => write!(f, "RaydiumCpmmWithdraw"),
             EventType::RaydiumClmmSwap => write!(f, "RaydiumClmmSwap"),
             EventType::RaydiumClmmSwapV2 => write!(f, "RaydiumClmmSwapV2"),
+            EventType::RaydiumClmmInstruction => write!(f, "RaydiumClmmInstruction"),
             EventType::RaydiumClmmClosePosition => write!(f, "RaydiumClmmClosePosition"),
             EventType::RaydiumClmmDecreaseLiquidityV2 => {
                 write!(f, "RaydiumClmmDecreaseLiquidityV2")
@@ -285,6 +288,7 @@ impl fmt::Display for EventType {
             EventType::MeteoraDlmmSwap2 => write!(f, "MeteoraDlmmSwap2"),
             EventType::WhirlpoolSwap => write!(f, "WhirlpoolSwap"),
             EventType::WhirlpoolSwapV2 => write!(f, "WhirlpoolSwapV2"),
+            EventType::WhirlpoolInstruction => write!(f, "WhirlpoolInstruction"),
             EventType::AccountRaydiumAmmV4AmmInfo => write!(f, "AccountRaydiumAmmV4AmmInfo"),
             EventType::AccountPumpSwapGlobalConfig => write!(f, "AccountPumpSwapGlobalConfig"),
             EventType::AccountPumpSwapPool => write!(f, "AccountPumpSwapPool"),
