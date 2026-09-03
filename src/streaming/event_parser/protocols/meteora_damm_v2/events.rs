@@ -399,6 +399,25 @@ pub struct MeteoraDammV2LiquidityChangeEvent {
     pub change_type: u8,
 }
 
+/// Quote-affecting DAMM v2 pool instruction without an authoritative swap/liquidity event.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, BorshDeserialize)]
+pub enum MeteoraDammV2InstructionKind {
+    SetPoolStatus,
+    UpdatePoolFees,
+    FixPoolFeeParams,
+    FixPoolLayoutVersion,
+}
+
+/// Raw instruction payload is retained so consumers can apply the exact program encoding.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BorshDeserialize)]
+pub struct MeteoraDammV2InstructionEvent {
+    #[borsh(skip)]
+    pub metadata: EventMetadata,
+    pub kind: MeteoraDammV2InstructionKind,
+    pub accounts: Vec<Pubkey>,
+    pub data: Vec<u8>,
+}
+
 /// Meteora DAMM v2 pool 账户状态事件（由 gRPC account 订阅触发）。
 ///
 /// 只携带账户元数据与原始 data，由下游（solarb_bot）使用其权威的
@@ -430,6 +449,10 @@ pub mod discriminators {
     pub const ADD_LIQUIDITY_IX: &[u8] = &[0xb5, 0x9d, 0x59, 0x43, 0x8f, 0xb6, 0x34, 0x48]; // add_liquidity
     pub const REMOVE_LIQUIDITY_IX: &[u8] = &[0x50, 0x55, 0xd1, 0x48, 0x18, 0xce, 0xb1, 0x6c]; // remove_liquidity
     pub const REMOVE_ALL_LIQUIDITY_IX: &[u8] = &[0x0a, 0x33, 0x3d, 0x23, 0x70, 0x69, 0x18, 0x55]; // remove_all_liquidity
+    pub const SET_POOL_STATUS_IX: &[u8] = &[0x70, 0x57, 0x87, 0xdf, 0x53, 0xcc, 0x84, 0x35];
+    pub const UPDATE_POOL_FEES_IX: &[u8] = &[0x76, 0xd9, 0xcb, 0xb3, 0x3c, 0x08, 0x46, 0x59];
+    pub const FIX_POOL_FEE_PARAMS_IX: &[u8] = &[0x84, 0x62, 0x51, 0xc4, 0x2c, 0x3a, 0x78, 0xc1];
+    pub const FIX_POOL_LAYOUT_VERSION_IX: &[u8] = &[0xa6, 0x9e, 0x45, 0x23, 0x51, 0xa7, 0xc8, 0xd7];
 
     // Account discriminators（账户 data 前 8 字节）
     pub const POOL_STATE_ACCOUNT: &[u8] = &[0xf1, 0x9a, 0x6d, 0x04, 0x11, 0xb1, 0x6d, 0xbc];

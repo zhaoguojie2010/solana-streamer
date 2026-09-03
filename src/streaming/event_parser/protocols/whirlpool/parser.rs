@@ -1,7 +1,9 @@
 use crate::streaming::event_parser::{
     common::{read_u128_le, read_u64_le, read_u8_le, EventMetadata, EventType, ProgramDataItem},
-    protocols::whirlpool::{discriminators, WhirlpoolExecutionEvent, WhirlpoolInstructionEvent,
-        WhirlpoolInstructionKind, WhirlpoolSwapEvent, WhirlpoolSwapV2Event},
+    protocols::whirlpool::{
+        discriminators, WhirlpoolExecutionEvent, WhirlpoolInstructionEvent,
+        WhirlpoolInstructionKind, WhirlpoolSwapEvent, WhirlpoolSwapV2Event,
+    },
     DexEvent,
 };
 use solana_sdk::pubkey::Pubkey;
@@ -39,66 +41,123 @@ pub fn parse_whirlpool_instruction_data(
     }
 }
 
-fn parse_modeled_instruction(discriminator: &[u8], data: &[u8], accounts: &[Pubkey], mut metadata: EventMetadata) -> Option<DexEvent> {
+fn parse_modeled_instruction(
+    discriminator: &[u8],
+    data: &[u8],
+    accounts: &[Pubkey],
+    mut metadata: EventMetadata,
+) -> Option<DexEvent> {
     let disc: [u8; 8] = discriminator.try_into().ok()?;
     use WhirlpoolInstructionKind as K;
     let kind = match disc {
-        [95,180,10,172,84,174,232,40] => K::InitializePool,
-        [207,45,87,242,27,63,204,67] => K::InitializePoolV2,
-        [143,94,96,76,172,124,119,199] => K::InitializePoolWithAdaptiveFee,
-        [11,188,193,214,141,91,149,184] => K::InitializeTickArray,
-        [41,33,165,200,120,231,142,50] => K::InitializeDynamicTickArray,
-        [135,128,47,77,15,152,240,49] => K::OpenPosition,
-        [242,29,134,48,58,110,14,60] => K::OpenPositionWithMetadata,
-        [212,47,95,92,114,102,131,250] => K::OpenPositionWithTokenExtensions,
-        [169,113,126,171,213,172,212,49] => K::OpenBundledPosition,
-        [46,156,243,118,13,205,251,178] => K::IncreaseLiquidity,
-        [133,29,89,223,69,238,176,10] => K::IncreaseLiquidityV2,
-        [160,38,208,111,104,91,44,1] => K::DecreaseLiquidity,
-        [58,127,188,62,79,82,196,96] => K::DecreaseLiquidityV2,
-        [191,169,224,11,131,19,158,253] => K::RepositionLiquidityV2,
-        [195,96,237,108,68,162,219,230] => K::TwoHopSwap,
-        [186,143,209,29,254,2,194,117] => K::TwoHopSwapV2,
-        [53,243,137,65,8,140,158,6] => K::SetFeeRate,
-        [95,7,4,50,154,79,156,131] => K::SetProtocolFeeRate,
+        [95, 180, 10, 172, 84, 174, 232, 40] => K::InitializePool,
+        [207, 45, 87, 242, 27, 63, 204, 67] => K::InitializePoolV2,
+        [143, 94, 96, 76, 172, 124, 119, 199] => K::InitializePoolWithAdaptiveFee,
+        [11, 188, 193, 214, 141, 91, 149, 184] => K::InitializeTickArray,
+        [41, 33, 165, 200, 120, 231, 142, 50] => K::InitializeDynamicTickArray,
+        [135, 128, 47, 77, 15, 152, 240, 49] => K::OpenPosition,
+        [242, 29, 134, 48, 58, 110, 14, 60] => K::OpenPositionWithMetadata,
+        [212, 47, 95, 92, 114, 102, 131, 250] => K::OpenPositionWithTokenExtensions,
+        [169, 113, 126, 171, 213, 172, 212, 49] => K::OpenBundledPosition,
+        [46, 156, 243, 118, 13, 205, 251, 178] => K::IncreaseLiquidity,
+        [133, 29, 89, 223, 69, 238, 176, 10] => K::IncreaseLiquidityV2,
+        [239, 251, 9, 124, 210, 198, 53, 43] => K::IncreaseLiquidityByTokenAmountsV2,
+        [160, 38, 208, 111, 104, 91, 44, 1] => K::DecreaseLiquidity,
+        [58, 127, 188, 62, 79, 82, 196, 96] => K::DecreaseLiquidityV2,
+        [191, 169, 224, 11, 131, 19, 158, 253] => K::RepositionLiquidityV2,
+        [195, 96, 237, 108, 68, 162, 219, 230] => K::TwoHopSwap,
+        [186, 143, 209, 29, 254, 2, 194, 117] => K::TwoHopSwapV2,
+        [53, 243, 137, 65, 8, 140, 158, 6] => K::SetFeeRate,
+        [95, 7, 4, 50, 154, 79, 156, 131] => K::SetProtocolFeeRate,
+        [154, 230, 250, 13, 236, 209, 75, 223] => K::UpdateFeesAndRewards,
+        [164, 152, 207, 99, 30, 186, 19, 182] => K::CollectFees,
+        [207, 117, 95, 191, 229, 180, 226, 15] => K::CollectFeesV2,
+        [70, 5, 132, 87, 86, 235, 177, 34] => K::CollectReward,
+        [177, 107, 37, 180, 160, 19, 49, 209] => K::CollectRewardV2,
+        [123, 134, 81, 0, 49, 68, 98, 98] => K::ClosePosition,
+        [1, 182, 135, 59, 155, 25, 99, 223] => K::ClosePositionWithTokenExtensions,
+        [41, 36, 216, 245, 27, 85, 103, 67] => K::CloseBundledPosition,
         other => K::Other(other),
     };
     metadata.event_type = EventType::WhirlpoolInstruction;
-    Some(DexEvent::WhirlpoolInstructionEvent(WhirlpoolInstructionEvent { metadata, kind,
-        accounts: accounts.to_vec(), data: data.to_vec(), execution_events: Vec::new() }))
+    Some(DexEvent::WhirlpoolInstructionEvent(WhirlpoolInstructionEvent {
+        metadata,
+        kind,
+        accounts: accounts.to_vec(),
+        data: data.to_vec(),
+        execution_events: Vec::new(),
+    }))
 }
 
-pub fn parse_execution_event_from_program_data(item: &ProgramDataItem) -> Option<WhirlpoolExecutionEvent> {
+pub fn parse_execution_event_from_program_data(
+    item: &ProgramDataItem,
+) -> Option<WhirlpoolExecutionEvent> {
     use base64::{engine::general_purpose::STANDARD, Engine};
-    if item.program_id != WHIRLPOOL_PROGRAM_ID { return None; }
+    if item.program_id != WHIRLPOOL_PROGRAM_ID {
+        return None;
+    }
     let bytes = STANDARD.decode(&item.base64).ok()?;
     let disc = bytes.get(..8)?;
     let data = bytes.get(8..)?;
-    let key = |o| Pubkey::try_from(data.get(o..o+32)?).ok();
-    let i32_at = |o| -> Option<i32> { Some(i32::from_le_bytes(data.get(o..o+4)?.try_into().ok()?)) };
-    let u128_at = |o| -> Option<u128> { Some(u128::from_le_bytes(data.get(o..o+16)?.try_into().ok()?)) };
+    let key = |o| Pubkey::try_from(data.get(o..o + 32)?).ok();
+    let i32_at =
+        |o| -> Option<i32> { Some(i32::from_le_bytes(data.get(o..o + 4)?.try_into().ok()?)) };
+    let u128_at =
+        |o| -> Option<u128> { Some(u128::from_le_bytes(data.get(o..o + 16)?.try_into().ok()?)) };
     match disc {
-        [237,175,243,230,147,117,101,121] => Some(WhirlpoolExecutionEvent::PositionOpened {
-            whirlpool: key(0)?, position: key(32)?, tick_lower: i32_at(64)?, tick_upper: i32_at(68)? }),
-        [100,118,173,87,12,198,254,229] => Some(WhirlpoolExecutionEvent::PoolInitialized {
-            whirlpool: key(0)?, config: key(32)?, mint_a: key(64)?, mint_b: key(96)?,
+        [237, 175, 243, 230, 147, 117, 101, 121] => Some(WhirlpoolExecutionEvent::PositionOpened {
+            whirlpool: key(0)?,
+            position: key(32)?,
+            tick_lower: i32_at(64)?,
+            tick_upper: i32_at(68)?,
+        }),
+        [100, 118, 173, 87, 12, 198, 254, 229] => Some(WhirlpoolExecutionEvent::PoolInitialized {
+            whirlpool: key(0)?,
+            config: key(32)?,
+            mint_a: key(64)?,
+            mint_b: key(96)?,
             tick_spacing: u16::from_le_bytes(data.get(128..130)?.try_into().ok()?),
-            token_program_a: key(130)?, token_program_b: key(162)?, decimals_a: *data.get(194)?,
-            decimals_b: *data.get(195)?, initial_sqrt_price: u128_at(196)? }),
-        [30,7,144,181,102,254,155,161] | [166,1,36,71,112,202,181,171] => {
+            token_program_a: key(130)?,
+            token_program_b: key(162)?,
+            decimals_a: *data.get(194)?,
+            decimals_b: *data.get(195)?,
+            initial_sqrt_price: u128_at(196)?,
+        }),
+        [30, 7, 144, 181, 102, 254, 155, 161] | [166, 1, 36, 71, 112, 202, 181, 171] => {
             let increasing = disc[0] == 30;
-            Some(WhirlpoolExecutionEvent::LiquidityChanged { whirlpool: key(0)?, position: key(32)?,
-                tick_lower: i32_at(64)?, tick_upper: i32_at(68)?, liquidity: u128_at(72)?, increasing })
+            Some(WhirlpoolExecutionEvent::LiquidityChanged {
+                whirlpool: key(0)?,
+                position: key(32)?,
+                tick_lower: i32_at(64)?,
+                tick_upper: i32_at(68)?,
+                liquidity: u128_at(72)?,
+                increasing,
+            })
         }
-        [95,130,181,132,251,50,195,38] => Some(WhirlpoolExecutionEvent::LiquidityRepositioned {
-            whirlpool: key(0)?, position: key(32)?, old_lower: i32_at(64)?, old_upper: i32_at(68)?,
-            new_lower: i32_at(72)?, new_upper: i32_at(76)?, old_liquidity: u128_at(80)?, new_liquidity: u128_at(96)? }),
+        [95, 130, 181, 132, 251, 50, 195, 38] => {
+            Some(WhirlpoolExecutionEvent::LiquidityRepositioned {
+                whirlpool: key(0)?,
+                position: key(32)?,
+                old_lower: i32_at(64)?,
+                old_upper: i32_at(68)?,
+                new_lower: i32_at(72)?,
+                new_upper: i32_at(76)?,
+                old_liquidity: u128_at(80)?,
+                new_liquidity: u128_at(96)?,
+            })
+        }
         discriminators::TRADED_EVENT => {
             let traded = parse_traded_event_from_log(&item.base64)?;
-            Some(WhirlpoolExecutionEvent::Traded { whirlpool: traded.whirlpool, a_to_b: traded.a_to_b,
-                pre_sqrt_price: traded.pre_sqrt_price, post_sqrt_price: traded.post_sqrt_price,
-                input_amount: traded.input_amount, output_amount: traded.output_amount,
-                lp_fee: traded.lp_fee, protocol_fee: traded.protocol_fee })
+            Some(WhirlpoolExecutionEvent::Traded {
+                whirlpool: traded.whirlpool,
+                a_to_b: traded.a_to_b,
+                pre_sqrt_price: traded.pre_sqrt_price,
+                post_sqrt_price: traded.post_sqrt_price,
+                input_amount: traded.input_amount,
+                output_amount: traded.output_amount,
+                lp_fee: traded.lp_fee,
+                protocol_fee: traded.protocol_fee,
+            })
         }
         _ => None,
     }

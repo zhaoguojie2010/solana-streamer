@@ -137,6 +137,7 @@ pub enum EventType {
     MeteoraDammV2InitializeCustomizablePool,
     MeteoraDammV2InitializePoolWithDynamicConfig,
     MeteoraDammV2LiquidityChange,
+    MeteoraDammV2Instruction,
     AccountMeteoraDammV2PoolState,
 
     // Meteora DLMM events
@@ -281,6 +282,7 @@ impl fmt::Display for EventType {
             EventType::MeteoraDammV2LiquidityChange => {
                 write!(f, "MeteoraDammV2LiquidityChange")
             }
+            EventType::MeteoraDammV2Instruction => write!(f, "MeteoraDammV2Instruction"),
             EventType::AccountMeteoraDammV2PoolState => {
                 write!(f, "AccountMeteoraDammV2PoolState")
             }

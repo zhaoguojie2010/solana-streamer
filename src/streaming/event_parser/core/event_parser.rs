@@ -13,7 +13,8 @@ use crate::streaming::event_parser::{
         merger_event::merge,
     },
     protocols::raydium_amm_v4::parser::RAYDIUM_AMM_V4_PROGRAM_ID,
-    DexEvent, Protocol, TxDexEvents, TxExecutionMetaAudit, TxSwapKind, TxTokenBalanceChange,
+    DexEvent, Protocol, ResolvedDexInstruction, TxDexEvents, TxExecutionMetaAudit,
+    TxExecutionStatus, TxSwapKind, TxTokenBalanceChange,
 };
 use parking_lot::Mutex;
 use prost_types::Timestamp;
@@ -194,8 +195,15 @@ impl EventParser {
         swap_cu_parse_config: Option<&SwapCuParseConfig>,
         tx_exec_meta_audit: bool,
     ) -> anyhow::Result<Option<TxDexEvents>> {
+        let block_unix_timestamp = block_time.as_ref().map(|time| time.seconds);
         let has_jito_tip = Self::grpc_transaction_has_jito_tip(&grpc_tx);
         let tx_exec_meta = tx_exec_meta_audit.then(|| Self::collect_tx_exec_meta(&grpc_tx));
+        let execution_status = match grpc_tx.meta.as_ref() {
+            Some(meta) if meta.err.is_none() => TxExecutionStatus::Success,
+            Some(_) => TxExecutionStatus::Failed,
+            None => TxExecutionStatus::Unknown,
+        };
+        let raw_dex_instructions = Self::collect_grpc_raw_dex_instructions(protocols, &grpc_tx);
         let events = Arc::new(Mutex::new(Vec::new()));
         let collected = events.clone();
         let callback = Arc::new(move |event: DexEvent| {
@@ -218,7 +226,7 @@ impl EventParser {
         .await?;
 
         let events = events.lock().clone();
-        if events.is_empty() {
+        if events.is_empty() && raw_dex_instructions.is_empty() {
             return Ok(None);
         }
         let is_arb = Self::is_arb_inner_swap_events(&events);
@@ -229,6 +237,7 @@ impl EventParser {
         Ok(Some(TxDexEvents {
             signature,
             slot: slot.unwrap_or(0),
+            block_time: block_unix_timestamp,
             transaction_index,
             entry_index: None,
             tx_index_in_entry: None,
@@ -240,6 +249,8 @@ impl EventParser {
             compute_unit_price_set,
             has_jito_tip,
             tx_exec_meta,
+            execution_status,
+            raw_dex_instructions,
             events,
         }))
     }
@@ -353,8 +364,15 @@ impl EventParser {
         tx_index_in_entry: Option<u64>,
         swap_cu_parse_config: Option<&SwapCuParseConfig>,
     ) -> anyhow::Result<Option<TxDexEvents>> {
+        let block_unix_timestamp = block_time.as_ref().map(|time| time.seconds);
         let has_jito_tip =
             Self::versioned_transaction_has_jito_tip(transaction, accounts, inner_instructions);
+        let raw_dex_instructions = Self::collect_versioned_raw_dex_instructions(
+            protocols,
+            transaction,
+            accounts,
+            inner_instructions,
+        );
         let events = Arc::new(Mutex::new(Vec::new()));
         let collected = events.clone();
         let callback = Arc::new(move |event: DexEvent| {
@@ -379,7 +397,7 @@ impl EventParser {
         .await?;
 
         let events = events.lock().clone();
-        if events.is_empty() {
+        if events.is_empty() && raw_dex_instructions.is_empty() {
             return Ok(None);
         }
         let is_arb = Self::is_arb_inner_swap_events(&events);
@@ -390,6 +408,7 @@ impl EventParser {
         Ok(Some(TxDexEvents {
             signature,
             slot: slot.unwrap_or(0),
+            block_time: block_unix_timestamp,
             transaction_index,
             entry_index,
             tx_index_in_entry,
@@ -401,8 +420,155 @@ impl EventParser {
             compute_unit_price_set,
             has_jito_tip,
             tx_exec_meta: None,
+            execution_status: TxExecutionStatus::Unknown,
+            raw_dex_instructions,
             events,
         }))
+    }
+
+    fn collect_grpc_raw_dex_instructions(
+        protocols: &[Protocol],
+        grpc_tx: &SubscribeUpdateTransactionInfo,
+    ) -> Vec<ResolvedDexInstruction> {
+        let Some(transaction) = grpc_tx.transaction.as_ref() else {
+            return Vec::new();
+        };
+        let Some(message) = transaction.message.as_ref() else {
+            return Vec::new();
+        };
+        let mut accounts = message
+            .account_keys
+            .iter()
+            .filter_map(|raw| Pubkey::try_from(raw.as_slice()).ok())
+            .collect::<Vec<_>>();
+        if accounts.len() != message.account_keys.len() {
+            return Vec::new();
+        }
+        if let Some(meta) = grpc_tx.meta.as_ref() {
+            let loaded = meta
+                .loaded_writable_addresses
+                .iter()
+                .chain(meta.loaded_readonly_addresses.iter())
+                .filter_map(|raw| Pubkey::try_from(raw.as_slice()).ok())
+                .collect::<Vec<_>>();
+            if loaded.len()
+                != meta.loaded_writable_addresses.len() + meta.loaded_readonly_addresses.len()
+            {
+                return Vec::new();
+            }
+            accounts.extend(loaded);
+        }
+        let mut resolved = Vec::new();
+        for (outer_index, instruction) in message.instructions.iter().enumerate() {
+            if let Some(item) = Self::resolve_raw_dex_instruction(
+                protocols,
+                instruction.program_id_index,
+                &instruction.accounts,
+                &instruction.data,
+                &accounts,
+                outer_index as u32,
+                None,
+                None,
+            ) {
+                resolved.push(item);
+            }
+            let Some(inner_group) = grpc_tx.meta.as_ref().and_then(|meta| {
+                meta.inner_instructions.iter().find(|group| group.index == outer_index as u32)
+            }) else {
+                continue;
+            };
+            for (inner_index, instruction) in inner_group.instructions.iter().enumerate() {
+                if let Some(item) = Self::resolve_raw_dex_instruction(
+                    protocols,
+                    instruction.program_id_index,
+                    &instruction.accounts,
+                    &instruction.data,
+                    &accounts,
+                    outer_index as u32,
+                    Some(inner_index as u32),
+                    instruction.stack_height,
+                ) {
+                    resolved.push(item);
+                }
+            }
+        }
+        resolved
+    }
+
+    fn collect_versioned_raw_dex_instructions(
+        protocols: &[Protocol],
+        transaction: &VersionedTransaction,
+        accounts: &[Pubkey],
+        inner_instructions: &[InnerInstructions],
+    ) -> Vec<ResolvedDexInstruction> {
+        let mut resolved = Vec::new();
+        for (outer_index, instruction) in transaction.message.instructions().iter().enumerate() {
+            if let Some(item) = Self::resolve_raw_dex_instruction(
+                protocols,
+                u32::from(instruction.program_id_index),
+                &instruction.accounts,
+                &instruction.data,
+                accounts,
+                outer_index as u32,
+                None,
+                None,
+            ) {
+                resolved.push(item);
+            }
+            let Some(inner_group) =
+                inner_instructions.iter().find(|group| usize::from(group.index) == outer_index)
+            else {
+                continue;
+            };
+            for (inner_index, instruction) in inner_group.instructions.iter().enumerate() {
+                let compiled = &instruction.instruction;
+                if let Some(item) = Self::resolve_raw_dex_instruction(
+                    protocols,
+                    u32::from(compiled.program_id_index),
+                    &compiled.accounts,
+                    &compiled.data,
+                    accounts,
+                    outer_index as u32,
+                    Some(inner_index as u32),
+                    instruction.stack_height,
+                ) {
+                    resolved.push(item);
+                }
+            }
+        }
+        resolved
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn resolve_raw_dex_instruction<I: Copy + Into<u32>>(
+        protocols: &[Protocol],
+        program_id_index: u32,
+        account_indices: &[I],
+        data: &[u8],
+        accounts: &[Pubkey],
+        outer_index: u32,
+        inner_index: Option<u32>,
+        stack_height: Option<u32>,
+    ) -> Option<ResolvedDexInstruction> {
+        let program_id = accounts.get(usize::try_from(program_id_index).ok()?).copied()?;
+        let protocol = EventDispatcher::match_protocol_by_program_id(&program_id)?;
+        if !protocols.contains(&protocol) {
+            return None;
+        }
+        let account_indices = account_indices.iter().copied().map(Into::into).collect::<Vec<_>>();
+        let instruction_accounts = account_indices
+            .iter()
+            .map(|index| accounts.get(usize::try_from(*index).ok()?).copied())
+            .collect::<Option<Vec<_>>>()?;
+        Some(ResolvedDexInstruction {
+            program_id,
+            accounts: instruction_accounts,
+            account_indices,
+            data: data.to_vec(),
+            outer_index,
+            inner_index,
+            stack_height,
+        })
     }
 
     fn collect_tx_exec_meta(grpc_tx: &SubscribeUpdateTransactionInfo) -> TxExecutionMetaAudit {
@@ -1567,155 +1733,159 @@ fn enrich_event_from_program_data(
     }
 
     for item in items {
-    match protocol {
-        Protocol::PancakeSwap => {
-            use crate::streaming::event_parser::protocols::pancakeswap::parser::parse_swap_event_from_program_data;
-            match event {
-                DexEvent::PancakeSwapSwapEvent(swap_event) => {
-                    if let Some(log_data) =
-                        parse_swap_event_from_program_data(item, &swap_event.pool_state)
-                    {
-                        swap_event.log_pool_state = log_data.pool_state;
-                        swap_event.log_sender = log_data.sender;
-                        swap_event.log_input_token_account = log_data.input_token_account;
-                        swap_event.log_output_token_account = log_data.output_token_account;
-                        swap_event.amount_0 = log_data.amount_0;
-                        swap_event.transfer_fee_0 = log_data.transfer_fee_0;
-                        swap_event.amount_1 = log_data.amount_1;
-                        swap_event.transfer_fee_1 = log_data.transfer_fee_1;
-                        swap_event.zero_for_one = log_data.zero_for_one;
-                        swap_event.sqrt_price_x64 = log_data.sqrt_price_x64;
-                        swap_event.liquidity = log_data.liquidity;
-                        swap_event.tick = log_data.tick;
+        match protocol {
+            Protocol::PancakeSwap => {
+                use crate::streaming::event_parser::protocols::pancakeswap::parser::parse_swap_event_from_program_data;
+                match event {
+                    DexEvent::PancakeSwapSwapEvent(swap_event) => {
+                        if let Some(log_data) =
+                            parse_swap_event_from_program_data(item, &swap_event.pool_state)
+                        {
+                            swap_event.log_pool_state = log_data.pool_state;
+                            swap_event.log_sender = log_data.sender;
+                            swap_event.log_input_token_account = log_data.input_token_account;
+                            swap_event.log_output_token_account = log_data.output_token_account;
+                            swap_event.amount_0 = log_data.amount_0;
+                            swap_event.transfer_fee_0 = log_data.transfer_fee_0;
+                            swap_event.amount_1 = log_data.amount_1;
+                            swap_event.transfer_fee_1 = log_data.transfer_fee_1;
+                            swap_event.zero_for_one = log_data.zero_for_one;
+                            swap_event.sqrt_price_x64 = log_data.sqrt_price_x64;
+                            swap_event.liquidity = log_data.liquidity;
+                            swap_event.tick = log_data.tick;
+                        }
                     }
-                }
-                DexEvent::PancakeSwapSwapV2Event(swap_event) => {
-                    if let Some(log_data) =
-                        parse_swap_event_from_program_data(item, &swap_event.pool_state)
-                    {
-                        swap_event.log_pool_state = log_data.pool_state;
-                        swap_event.log_sender = log_data.sender;
-                        swap_event.log_input_token_account = log_data.input_token_account;
-                        swap_event.log_output_token_account = log_data.output_token_account;
-                        swap_event.amount_0 = log_data.amount_0;
-                        swap_event.transfer_fee_0 = log_data.transfer_fee_0;
-                        swap_event.amount_1 = log_data.amount_1;
-                        swap_event.transfer_fee_1 = log_data.transfer_fee_1;
-                        swap_event.zero_for_one = log_data.zero_for_one;
-                        swap_event.sqrt_price_x64 = log_data.sqrt_price_x64;
-                        swap_event.liquidity = log_data.liquidity;
-                        swap_event.tick = log_data.tick;
+                    DexEvent::PancakeSwapSwapV2Event(swap_event) => {
+                        if let Some(log_data) =
+                            parse_swap_event_from_program_data(item, &swap_event.pool_state)
+                        {
+                            swap_event.log_pool_state = log_data.pool_state;
+                            swap_event.log_sender = log_data.sender;
+                            swap_event.log_input_token_account = log_data.input_token_account;
+                            swap_event.log_output_token_account = log_data.output_token_account;
+                            swap_event.amount_0 = log_data.amount_0;
+                            swap_event.transfer_fee_0 = log_data.transfer_fee_0;
+                            swap_event.amount_1 = log_data.amount_1;
+                            swap_event.transfer_fee_1 = log_data.transfer_fee_1;
+                            swap_event.zero_for_one = log_data.zero_for_one;
+                            swap_event.sqrt_price_x64 = log_data.sqrt_price_x64;
+                            swap_event.liquidity = log_data.liquidity;
+                            swap_event.tick = log_data.tick;
+                        }
                     }
-                }
-                _ => {}
-            }
-        }
-        Protocol::RaydiumCpmm => {
-            use crate::streaming::event_parser::protocols::raydium_cpmm::parser::parse_swap_event_from_program_data;
-            if let DexEvent::RaydiumCpmmSwapEvent(swap_event) = event {
-                if let Some(log_data) =
-                    parse_swap_event_from_program_data(item, &swap_event.pool_state)
-                {
-                    swap_event.input_vault_before = log_data.input_vault_before;
-                    swap_event.output_vault_before = log_data.output_vault_before;
-                    swap_event.input_amount = log_data.input_amount;
-                    swap_event.output_amount = log_data.output_amount;
-                    swap_event.input_transfer_fee = log_data.input_transfer_fee;
-                    swap_event.output_transfer_fee = log_data.output_transfer_fee;
-                    swap_event.base_input = log_data.base_input;
-                    swap_event.trade_fee = log_data.trade_fee;
-                    swap_event.creator_fee = log_data.creator_fee;
-                    swap_event.creator_fee_on_input = log_data.creator_fee_on_input;
+                    _ => {}
                 }
             }
-        }
-        Protocol::RaydiumClmm => {
-            use crate::streaming::event_parser::protocols::raydium_clmm::parser::{parse_execution_event_from_program_data, parse_swap_event_from_program_data};
-            match event {
-                DexEvent::RaydiumClmmInstructionEvent(instruction) => {
-                    if let Some(execution) = parse_execution_event_from_program_data(item) {
-                        instruction.execution_events.push(execution);
-                    }
-                }
-                DexEvent::RaydiumClmmSwapEvent(swap_event) => {
+            Protocol::RaydiumCpmm => {
+                use crate::streaming::event_parser::protocols::raydium_cpmm::parser::parse_swap_event_from_program_data;
+                if let DexEvent::RaydiumCpmmSwapEvent(swap_event) = event {
                     if let Some(log_data) =
                         parse_swap_event_from_program_data(item, &swap_event.pool_state)
                     {
-                        swap_event.sender = log_data.sender;
-                        swap_event.token_account_0 = log_data.token_account_0;
-                        swap_event.token_account_1 = log_data.token_account_1;
-                        swap_event.amount_0 = log_data.amount_0;
-                        swap_event.transfer_fee_0 = log_data.transfer_fee_0;
-                        swap_event.amount_1 = log_data.amount_1;
-                        swap_event.transfer_fee_1 = log_data.transfer_fee_1;
-                        swap_event.zero_for_one = log_data.zero_for_one;
-                        swap_event.sqrt_price_x64 = log_data.sqrt_price_x64;
-                        swap_event.liquidity = log_data.liquidity;
-                        swap_event.tick = log_data.tick;
-                    }
-                }
-                DexEvent::RaydiumClmmSwapV2Event(swap_event) => {
-                    if let Some(log_data) =
-                        parse_swap_event_from_program_data(item, &swap_event.pool_state)
-                    {
-                        swap_event.sender = log_data.sender;
-                        swap_event.token_account_0 = log_data.token_account_0;
-                        swap_event.token_account_1 = log_data.token_account_1;
-                        swap_event.amount_0 = log_data.amount_0;
-                        swap_event.transfer_fee_0 = log_data.transfer_fee_0;
-                        swap_event.amount_1 = log_data.amount_1;
-                        swap_event.transfer_fee_1 = log_data.transfer_fee_1;
-                        swap_event.zero_for_one = log_data.zero_for_one;
-                        swap_event.sqrt_price_x64 = log_data.sqrt_price_x64;
-                        swap_event.liquidity = log_data.liquidity;
-                        swap_event.tick = log_data.tick;
-                    }
-                }
-                _ => {}
-            }
-        }
-        Protocol::Whirlpool => {
-            use crate::streaming::event_parser::protocols::whirlpool::parser::{parse_execution_event_from_program_data, parse_traded_event_from_program_data};
-            match event {
-                DexEvent::WhirlpoolInstructionEvent(instruction) => {
-                    if let Some(execution) = parse_execution_event_from_program_data(item) {
-                        instruction.execution_events.push(execution);
-                    }
-                }
-                DexEvent::WhirlpoolSwapEvent(swap_event) => {
-                    if let Some(log_data) =
-                        parse_traded_event_from_program_data(item, &swap_event.whirlpool)
-                    {
-                        swap_event.a_to_b = log_data.a_to_b;
-                        swap_event.pre_sqrt_price = log_data.pre_sqrt_price;
-                        swap_event.post_sqrt_price = log_data.post_sqrt_price;
+                        swap_event.input_vault_before = log_data.input_vault_before;
+                        swap_event.output_vault_before = log_data.output_vault_before;
                         swap_event.input_amount = log_data.input_amount;
                         swap_event.output_amount = log_data.output_amount;
                         swap_event.input_transfer_fee = log_data.input_transfer_fee;
                         swap_event.output_transfer_fee = log_data.output_transfer_fee;
-                        swap_event.lp_fee = log_data.lp_fee;
-                        swap_event.protocol_fee = log_data.protocol_fee;
+                        swap_event.base_input = log_data.base_input;
+                        swap_event.trade_fee = log_data.trade_fee;
+                        swap_event.creator_fee = log_data.creator_fee;
+                        swap_event.creator_fee_on_input = log_data.creator_fee_on_input;
                     }
                 }
-                DexEvent::WhirlpoolSwapV2Event(swap_event) => {
-                    if let Some(log_data) =
-                        parse_traded_event_from_program_data(item, &swap_event.whirlpool)
-                    {
-                        swap_event.a_to_b = log_data.a_to_b;
-                        swap_event.pre_sqrt_price = log_data.pre_sqrt_price;
-                        swap_event.post_sqrt_price = log_data.post_sqrt_price;
-                        swap_event.input_amount = log_data.input_amount;
-                        swap_event.output_amount = log_data.output_amount;
-                        swap_event.input_transfer_fee = log_data.input_transfer_fee;
-                        swap_event.output_transfer_fee = log_data.output_transfer_fee;
-                        swap_event.lp_fee = log_data.lp_fee;
-                        swap_event.protocol_fee = log_data.protocol_fee;
-                    }
-                }
-                _ => {}
             }
+            Protocol::RaydiumClmm => {
+                use crate::streaming::event_parser::protocols::raydium_clmm::parser::{
+                    parse_execution_event_from_program_data, parse_swap_event_from_program_data,
+                };
+                match event {
+                    DexEvent::RaydiumClmmInstructionEvent(instruction) => {
+                        if let Some(execution) = parse_execution_event_from_program_data(item) {
+                            instruction.execution_events.push(execution);
+                        }
+                    }
+                    DexEvent::RaydiumClmmSwapEvent(swap_event) => {
+                        if let Some(log_data) =
+                            parse_swap_event_from_program_data(item, &swap_event.pool_state)
+                        {
+                            swap_event.sender = log_data.sender;
+                            swap_event.token_account_0 = log_data.token_account_0;
+                            swap_event.token_account_1 = log_data.token_account_1;
+                            swap_event.amount_0 = log_data.amount_0;
+                            swap_event.transfer_fee_0 = log_data.transfer_fee_0;
+                            swap_event.amount_1 = log_data.amount_1;
+                            swap_event.transfer_fee_1 = log_data.transfer_fee_1;
+                            swap_event.zero_for_one = log_data.zero_for_one;
+                            swap_event.sqrt_price_x64 = log_data.sqrt_price_x64;
+                            swap_event.liquidity = log_data.liquidity;
+                            swap_event.tick = log_data.tick;
+                        }
+                    }
+                    DexEvent::RaydiumClmmSwapV2Event(swap_event) => {
+                        if let Some(log_data) =
+                            parse_swap_event_from_program_data(item, &swap_event.pool_state)
+                        {
+                            swap_event.sender = log_data.sender;
+                            swap_event.token_account_0 = log_data.token_account_0;
+                            swap_event.token_account_1 = log_data.token_account_1;
+                            swap_event.amount_0 = log_data.amount_0;
+                            swap_event.transfer_fee_0 = log_data.transfer_fee_0;
+                            swap_event.amount_1 = log_data.amount_1;
+                            swap_event.transfer_fee_1 = log_data.transfer_fee_1;
+                            swap_event.zero_for_one = log_data.zero_for_one;
+                            swap_event.sqrt_price_x64 = log_data.sqrt_price_x64;
+                            swap_event.liquidity = log_data.liquidity;
+                            swap_event.tick = log_data.tick;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Protocol::Whirlpool => {
+                use crate::streaming::event_parser::protocols::whirlpool::parser::{
+                    parse_execution_event_from_program_data, parse_traded_event_from_program_data,
+                };
+                match event {
+                    DexEvent::WhirlpoolInstructionEvent(instruction) => {
+                        if let Some(execution) = parse_execution_event_from_program_data(item) {
+                            instruction.execution_events.push(execution);
+                        }
+                    }
+                    DexEvent::WhirlpoolSwapEvent(swap_event) => {
+                        if let Some(log_data) =
+                            parse_traded_event_from_program_data(item, &swap_event.whirlpool)
+                        {
+                            swap_event.a_to_b = log_data.a_to_b;
+                            swap_event.pre_sqrt_price = log_data.pre_sqrt_price;
+                            swap_event.post_sqrt_price = log_data.post_sqrt_price;
+                            swap_event.input_amount = log_data.input_amount;
+                            swap_event.output_amount = log_data.output_amount;
+                            swap_event.input_transfer_fee = log_data.input_transfer_fee;
+                            swap_event.output_transfer_fee = log_data.output_transfer_fee;
+                            swap_event.lp_fee = log_data.lp_fee;
+                            swap_event.protocol_fee = log_data.protocol_fee;
+                        }
+                    }
+                    DexEvent::WhirlpoolSwapV2Event(swap_event) => {
+                        if let Some(log_data) =
+                            parse_traded_event_from_program_data(item, &swap_event.whirlpool)
+                        {
+                            swap_event.a_to_b = log_data.a_to_b;
+                            swap_event.pre_sqrt_price = log_data.pre_sqrt_price;
+                            swap_event.post_sqrt_price = log_data.post_sqrt_price;
+                            swap_event.input_amount = log_data.input_amount;
+                            swap_event.output_amount = log_data.output_amount;
+                            swap_event.input_transfer_fee = log_data.input_transfer_fee;
+                            swap_event.output_transfer_fee = log_data.output_transfer_fee;
+                            swap_event.lp_fee = log_data.lp_fee;
+                            swap_event.protocol_fee = log_data.protocol_fee;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            _ => {}
         }
-        _ => {}
-    }
     }
 }

@@ -4,7 +4,8 @@ use crate::streaming::event_parser::{
         discriminators, meteora_damm_v2_initialize_pool_event_decode,
         meteora_damm_v2_liquidity_change_event_decode, meteora_damm_v2_swap_event_decode,
         MeteoraDammV2InitializeCustomizablePoolEvent, MeteoraDammV2InitializePoolEvent,
-        MeteoraDammV2InitializePoolWithDynamicConfigEvent, MeteoraDammV2LiquidityChangeEvent,
+        MeteoraDammV2InitializePoolWithDynamicConfigEvent, MeteoraDammV2InstructionEvent,
+        MeteoraDammV2InstructionKind, MeteoraDammV2LiquidityChangeEvent,
         MeteoraDammV2PoolStateAccountEvent, MeteoraDammV2Swap2Event, MeteoraDammV2SwapEvent,
     },
     DexEvent,
@@ -61,8 +62,50 @@ pub fn parse_meteora_damm_v2_instruction_data(
             metadata,
             LiquidityInstructionKind::RemoveAll,
         ),
+        discriminators::SET_POOL_STATUS_IX => parse_state_instruction(
+            data,
+            accounts,
+            metadata,
+            MeteoraDammV2InstructionKind::SetPoolStatus,
+        ),
+        discriminators::UPDATE_POOL_FEES_IX => parse_state_instruction(
+            data,
+            accounts,
+            metadata,
+            MeteoraDammV2InstructionKind::UpdatePoolFees,
+        ),
+        discriminators::FIX_POOL_FEE_PARAMS_IX => parse_state_instruction(
+            data,
+            accounts,
+            metadata,
+            MeteoraDammV2InstructionKind::FixPoolFeeParams,
+        ),
+        discriminators::FIX_POOL_LAYOUT_VERSION_IX => parse_state_instruction(
+            data,
+            accounts,
+            metadata,
+            MeteoraDammV2InstructionKind::FixPoolLayoutVersion,
+        ),
         _ => None,
     }
+}
+
+fn parse_state_instruction(
+    data: &[u8],
+    accounts: &[Pubkey],
+    mut metadata: EventMetadata,
+    kind: MeteoraDammV2InstructionKind,
+) -> Option<DexEvent> {
+    if accounts.is_empty() {
+        return None;
+    }
+    metadata.event_type = EventType::MeteoraDammV2Instruction;
+    Some(DexEvent::MeteoraDammV2InstructionEvent(MeteoraDammV2InstructionEvent {
+        metadata,
+        kind,
+        accounts: accounts.to_vec(),
+        data: data.to_vec(),
+    }))
 }
 
 /// 解析 Meteora DAMM v2 inner instruction data (CPI events)
@@ -226,7 +269,7 @@ fn parse_initialize_pool_instruction(
     // 读取 activation_point (Option<u64>)
     let option_tag = data[offset];
     offset += 1;
-    let _activation_point = if option_tag == 1 && data.len() >= offset + 8 {
+    let activation_point = if option_tag == 1 && data.len() >= offset + 8 {
         Some(u64::from_le_bytes(data[offset..offset + 8].try_into().ok()?))
     } else {
         None
@@ -255,6 +298,7 @@ fn parse_initialize_pool_instruction(
         remaining_accounts: accounts[20..].to_vec(),
         liquidity,
         sqrt_price,
+        activation_point: activation_point.unwrap_or_default(),
         ..Default::default()
     }))
 }
@@ -325,11 +369,18 @@ fn parse_initialize_customizable_pool_instruction(
 
     // 读取 activation_point (Option<u64>)
     let option_tag = data[offset];
-    let _activation_point = if option_tag == 1 && data.len() >= offset + 9 {
+    let activation_point = if option_tag == 1 && data.len() >= offset + 9 {
         Some(u64::from_le_bytes(data[offset + 1..offset + 9].try_into().ok()?))
     } else {
         None
     };
+    let activation_point = activation_point.unwrap_or_else(|| {
+        if activation_type == 0 {
+            metadata.slot
+        } else {
+            u64::try_from(metadata.block_time.max(0)).unwrap_or_default()
+        }
+    });
 
     Some(DexEvent::MeteoraDammV2InitializeCustomizablePoolEvent(
         MeteoraDammV2InitializeCustomizablePoolEvent {
@@ -361,6 +412,7 @@ fn parse_initialize_customizable_pool_instruction(
             collect_fee_mode,
             liquidity,
             sqrt_price,
+            activation_point,
             ..Default::default()
         },
     ))
@@ -428,11 +480,18 @@ fn parse_initialize_pool_with_dynamic_config_instruction(
 
     // 读取 activation_point (Option<u64>)
     let option_tag = data[offset];
-    let _activation_point = if option_tag == 1 && data.len() >= offset + 9 {
+    let activation_point = if option_tag == 1 && data.len() >= offset + 9 {
         Some(u64::from_le_bytes(data[offset + 1..offset + 9].try_into().ok()?))
     } else {
         None
     };
+    let activation_point = activation_point.unwrap_or_else(|| {
+        if activation_type == 0 {
+            metadata.slot
+        } else {
+            u64::try_from(metadata.block_time.max(0)).unwrap_or_default()
+        }
+    });
 
     Some(DexEvent::MeteoraDammV2InitializePoolWithDynamicConfigEvent(
         MeteoraDammV2InitializePoolWithDynamicConfigEvent {
@@ -465,6 +524,7 @@ fn parse_initialize_pool_with_dynamic_config_instruction(
             collect_fee_mode,
             liquidity,
             sqrt_price,
+            activation_point,
             ..Default::default()
         },
     ))

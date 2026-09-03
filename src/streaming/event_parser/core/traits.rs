@@ -20,6 +20,31 @@ use serde::{Deserialize, Serialize};
 use solana_sdk::{pubkey::Pubkey, signature::Signature};
 use std::fmt::Debug;
 
+/// Execution evidence carried by the source that produced a transaction batch.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TxExecutionStatus {
+    #[default]
+    Unknown,
+    Success,
+    Failed,
+}
+
+/// Lossless DEX instruction captured before protocol event decoding.
+///
+/// Account pubkeys follow the instruction account order and `data` includes the original
+/// discriminator. This is deliberately independent from CPI/program-data observations so a
+/// consumer can execute protocol math without feeding observed post-state back into prediction.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResolvedDexInstruction {
+    pub program_id: Pubkey,
+    pub accounts: Vec<Pubkey>,
+    pub account_indices: Vec<u32>,
+    pub data: Vec<u8>,
+    pub outer_index: u32,
+    pub inner_index: Option<u32>,
+    pub stack_height: Option<u32>,
+}
+
 /// 交易级 swap 形态分类，用于下游快速判断一笔 tx 的池子结构。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum TxSwapKind {
@@ -54,6 +79,9 @@ pub struct TxExecutionMetaAudit {
 pub struct TxDexEvents {
     pub signature: Signature,
     pub slot: u64,
+    /// Block unix timestamp when supplied by the processed source.
+    #[serde(default)]
+    pub block_time: Option<i64>,
     pub transaction_index: Option<u64>,
     pub entry_index: Option<u64>,
     pub tx_index_in_entry: Option<u64>,
@@ -78,6 +106,13 @@ pub struct TxDexEvents {
     /// Present only when explicitly enabled by the stream client.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tx_exec_meta: Option<TxExecutionMetaAudit>,
+    /// Source execution status. Processed gRPC sets this from transaction meta; raw/shred
+    /// sources leave it unknown and therefore cannot advance persistent pending state.
+    #[serde(default)]
+    pub execution_status: TxExecutionStatus,
+    /// Ordered raw DEX instructions, kept separate from parsed execution observations.
+    #[serde(default)]
+    pub raw_dex_instructions: Vec<ResolvedDexInstruction>,
     pub events: Vec<DexEvent>,
 }
 
@@ -163,6 +198,7 @@ pub enum DexEvent {
         MeteoraDammV2InitializePoolWithDynamicConfigEvent,
     ),
     MeteoraDammV2LiquidityChangeEvent(MeteoraDammV2LiquidityChangeEvent),
+    MeteoraDammV2InstructionEvent(MeteoraDammV2InstructionEvent),
     MeteoraDammV2PoolStateAccountEvent(MeteoraDammV2PoolStateAccountEvent),
 
     // Meteora DLMM events
@@ -250,6 +286,7 @@ impl DexEvent {
             DexEvent::MeteoraDammV2InitializeCustomizablePoolEvent(e) => &e.metadata,
             DexEvent::MeteoraDammV2InitializePoolWithDynamicConfigEvent(e) => &e.metadata,
             DexEvent::MeteoraDammV2LiquidityChangeEvent(e) => &e.metadata,
+            DexEvent::MeteoraDammV2InstructionEvent(e) => &e.metadata,
             DexEvent::MeteoraDammV2PoolStateAccountEvent(e) => &e.metadata,
             DexEvent::MeteoraDlmmSwapEvent(e) => &e.metadata,
             DexEvent::MeteoraDlmmSwap2Event(e) => &e.metadata,
@@ -331,6 +368,7 @@ impl DexEvent {
             DexEvent::MeteoraDammV2InitializeCustomizablePoolEvent(e) => &mut e.metadata,
             DexEvent::MeteoraDammV2InitializePoolWithDynamicConfigEvent(e) => &mut e.metadata,
             DexEvent::MeteoraDammV2LiquidityChangeEvent(e) => &mut e.metadata,
+            DexEvent::MeteoraDammV2InstructionEvent(e) => &mut e.metadata,
             DexEvent::MeteoraDammV2PoolStateAccountEvent(e) => &mut e.metadata,
             DexEvent::MeteoraDlmmSwapEvent(e) => &mut e.metadata,
             DexEvent::MeteoraDlmmSwap2Event(e) => &mut e.metadata,
