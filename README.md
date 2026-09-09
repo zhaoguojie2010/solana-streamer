@@ -332,6 +332,8 @@ src/
 
 ## ⚡ Performance Considerations
 
+See the [performance architecture proposal (中文)](docs/performance-architecture.md) for the planned event model, ownership design, migration phases, and validation criteria.
+
 1. **Connection Management**: Properly handle connection lifecycle and reconnection
 2. **Event Filtering**: Use protocol filtering to reduce unnecessary event processing
 3. **Memory Management**: Implement appropriate cleanup for long-running streams
