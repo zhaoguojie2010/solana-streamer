@@ -5,7 +5,6 @@ use crate::streaming::event_parser::core::account_event_parser::{
 use crate::streaming::event_parser::core::common_event_parser::{
     SetComputeUnitLimitEvent, SetComputeUnitPriceEvent,
 };
-use crate::streaming::event_parser::protocols::block::block_meta_event::BlockMetaEvent;
 use crate::streaming::event_parser::protocols::bonk::events::*;
 use crate::streaming::event_parser::protocols::meteora_damm_v2::events::*;
 use crate::streaming::event_parser::protocols::meteora_dlmm::events::*;
@@ -17,7 +16,7 @@ use crate::streaming::event_parser::protocols::raydium_clmm::events::*;
 use crate::streaming::event_parser::protocols::raydium_cpmm::events::*;
 use crate::streaming::event_parser::protocols::whirlpool::events::*;
 use serde::{Deserialize, Serialize};
-use solana_sdk::{pubkey::Pubkey, signature::Signature};
+use solana_sdk::pubkey::Pubkey;
 use std::fmt::Debug;
 
 /// Execution evidence carried by the source that produced a transaction batch.
@@ -27,22 +26,6 @@ pub enum TxExecutionStatus {
     Unknown,
     Success,
     Failed,
-}
-
-/// Lossless DEX instruction captured before protocol event decoding.
-///
-/// Account pubkeys follow the instruction account order and `data` includes the original
-/// discriminator. This is deliberately independent from CPI/program-data observations so a
-/// consumer can execute protocol math without feeding observed post-state back into prediction.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ResolvedDexInstruction {
-    pub program_id: Pubkey,
-    pub accounts: Vec<Pubkey>,
-    pub account_indices: Vec<u32>,
-    pub data: Vec<u8>,
-    pub outer_index: u32,
-    pub inner_index: Option<u32>,
-    pub stack_height: Option<u32>,
 }
 
 /// 交易级 swap 形态分类，用于下游快速判断一笔 tx 的池子结构。
@@ -76,76 +59,17 @@ pub struct TxExecutionMetaAudit {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct TxDexEvents {
-    pub signature: Signature,
-    pub slot: u64,
-    /// Block unix timestamp when supplied by the processed source.
-    #[serde(default)]
-    pub block_time: Option<i64>,
-    pub transaction_index: Option<u64>,
-    pub entry_index: Option<u64>,
-    pub tx_index_in_entry: Option<u64>,
-    pub recv_us: i64,
-    /// True when an outer custom-program instruction CPI-calls DEX swaps that form a cycle.
-    pub is_arb: bool,
-    /// 交易级 swap 形态分类（Arb > Route > SimpleSwap 优先级）。
-    #[serde(default)]
-    pub tx_kind: TxSwapKind,
-    /// Effective transaction CU price in micro-lamports/CU; zero when not set.
-    #[serde(default)]
-    pub compute_unit_price_micro_lamports: u64,
-    /// Explicit transaction CU limit, when present.
-    #[serde(default)]
-    pub compute_unit_limit: Option<u32>,
-    /// Distinguishes an absent CU price instruction from an explicit zero price.
-    #[serde(default)]
-    pub compute_unit_price_set: bool,
-    /// True only when a System Program transfer pays a known Jito tip account.
-    #[serde(default)]
-    pub has_jito_tip: bool,
-    /// Present only when explicitly enabled by the stream client.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tx_exec_meta: Option<TxExecutionMetaAudit>,
-    /// Source execution status. Processed gRPC sets this from transaction meta; raw transaction
-    /// sources leave it unknown and therefore cannot advance persistent pending state.
-    #[serde(default)]
-    pub execution_status: TxExecutionStatus,
-    /// Ordered raw DEX instructions, kept separate from parsed execution observations.
-    #[serde(default)]
-    pub raw_dex_instructions: Vec<ResolvedDexInstruction>,
-    pub events: Vec<DexEvent>,
-}
-
-/// Unified Event Enum - Replaces the trait-based approach with a type-safe enum
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub enum DexEvent {
-    // PancakeSwap events
+pub enum TxEvent {
     PancakeSwapSwapEvent(PancakeSwapSwapEvent),
     PancakeSwapSwapV2Event(PancakeSwapSwapV2Event),
-    PancakeSwapPoolStateAccountEvent(PancakeSwapPoolStateAccountEvent),
-    PancakeSwapTickArrayStateAccountEvent(PancakeSwapTickArrayStateAccountEvent),
-    PancakeSwapTickArrayBitmapExtensionAccountEvent(
-        PancakeSwapTickArrayBitmapExtensionAccountEvent,
-    ),
-
-    // Bonk events
     BonkTradeEvent(BonkTradeEvent),
     BonkPoolCreateEvent(BonkPoolCreateEvent),
     BonkMigrateToAmmEvent(BonkMigrateToAmmEvent),
     BonkMigrateToCpswapEvent(BonkMigrateToCpswapEvent),
-    BonkPoolStateAccountEvent(BonkPoolStateAccountEvent),
-    BonkGlobalConfigAccountEvent(BonkGlobalConfigAccountEvent),
-    BonkPlatformConfigAccountEvent(BonkPlatformConfigAccountEvent),
-
-    // PumpFun events
     PumpFunCreateTokenEvent(PumpFunCreateTokenEvent),
     PumpFunCreateV2TokenEvent(PumpFunCreateV2TokenEvent),
     PumpFunTradeEvent(PumpFunTradeEvent),
     PumpFunMigrateEvent(PumpFunMigrateEvent),
-    PumpFunBondingCurveAccountEvent(PumpFunBondingCurveAccountEvent),
-    PumpFunGlobalAccountEvent(PumpFunGlobalAccountEvent),
-
-    // PumpSwap events
     PumpSwapBuyEvent(PumpSwapBuyEvent),
     PumpSwapBuyExactQuoteInEvent(PumpSwapBuyExactQuoteInEvent),
     PumpSwapSellEvent(PumpSwapSellEvent),
@@ -153,18 +77,11 @@ pub enum DexEvent {
     PumpSwapInitBoostEvent(PumpSwapInitBoostEvent),
     PumpSwapDepositEvent(PumpSwapDepositEvent),
     PumpSwapWithdrawEvent(PumpSwapWithdrawEvent),
-    PumpSwapGlobalConfigAccountEvent(PumpSwapGlobalConfigAccountEvent),
-    PumpSwapPoolAccountEvent(PumpSwapPoolAccountEvent),
-
-    // Raydium AMM V4 events
     RaydiumAmmV4SwapEvent(RaydiumAmmV4SwapEvent),
     RaydiumAmmV4DepositEvent(RaydiumAmmV4DepositEvent),
     RaydiumAmmV4WithdrawEvent(RaydiumAmmV4WithdrawEvent),
     RaydiumAmmV4WithdrawPnlEvent(RaydiumAmmV4WithdrawPnlEvent),
     RaydiumAmmV4Initialize2Event(RaydiumAmmV4Initialize2Event),
-    RaydiumAmmV4AmmInfoAccountEvent(RaydiumAmmV4AmmInfoAccountEvent),
-
-    // Raydium CLMM events
     RaydiumClmmSwapEvent(RaydiumClmmSwapEvent),
     RaydiumClmmSwapV2Event(RaydiumClmmSwapV2Event),
     RaydiumClmmInstructionEvent(RaydiumClmmInstructionEvent),
@@ -174,22 +91,10 @@ pub enum DexEvent {
     RaydiumClmmCreatePoolEvent(RaydiumClmmCreatePoolEvent),
     RaydiumClmmOpenPositionWithToken22NftEvent(RaydiumClmmOpenPositionWithToken22NftEvent),
     RaydiumClmmOpenPositionV2Event(RaydiumClmmOpenPositionV2Event),
-    RaydiumClmmAmmConfigAccountEvent(RaydiumClmmAmmConfigAccountEvent),
-    RaydiumClmmPoolStateAccountEvent(RaydiumClmmPoolStateAccountEvent),
-    RaydiumClmmTickArrayStateAccountEvent(RaydiumClmmTickArrayStateAccountEvent),
-    RaydiumClmmTickArrayBitmapExtensionAccountEvent(
-        RaydiumClmmTickArrayBitmapExtensionAccountEvent,
-    ),
-
-    // Raydium CPMM events
     RaydiumCpmmSwapEvent(RaydiumCpmmSwapEvent),
     RaydiumCpmmDepositEvent(RaydiumCpmmDepositEvent),
     RaydiumCpmmWithdrawEvent(RaydiumCpmmWithdrawEvent),
     RaydiumCpmmInitializeEvent(RaydiumCpmmInitializeEvent),
-    RaydiumCpmmAmmConfigAccountEvent(RaydiumCpmmAmmConfigAccountEvent),
-    RaydiumCpmmPoolStateAccountEvent(RaydiumCpmmPoolStateAccountEvent),
-
-    // Meteora DAMM v2 events
     MeteoraDammV2SwapEvent(MeteoraDammV2SwapEvent),
     MeteoraDammV2Swap2Event(MeteoraDammV2Swap2Event),
     MeteoraDammV2InitializePoolEvent(MeteoraDammV2InitializePoolEvent),
@@ -199,194 +104,217 @@ pub enum DexEvent {
     ),
     MeteoraDammV2LiquidityChangeEvent(MeteoraDammV2LiquidityChangeEvent),
     MeteoraDammV2InstructionEvent(MeteoraDammV2InstructionEvent),
-    MeteoraDammV2PoolStateAccountEvent(MeteoraDammV2PoolStateAccountEvent),
-
-    // Meteora DLMM events
     MeteoraDlmmSwapEvent(MeteoraDlmmSwapEvent),
     MeteoraDlmmSwap2Event(MeteoraDlmmSwap2Event),
     MeteoraDlmmInstructionEvent(MeteoraDlmmInstructionEvent),
-    MeteoraDlmmLbPairAccountEvent(MeteoraDlmmLbPairAccountEvent),
-    MeteoraDlmmBinArrayAccountEvent(MeteoraDlmmBinArrayAccountEvent),
-    MeteoraDlmmBinArrayBitmapExtensionAccountEvent(MeteoraDlmmBinArrayBitmapExtensionAccountEvent),
-
-    // Whirlpool events
     WhirlpoolSwapEvent(WhirlpoolSwapEvent),
     WhirlpoolSwapV2Event(WhirlpoolSwapV2Event),
     WhirlpoolInstructionEvent(WhirlpoolInstructionEvent),
-    WhirlpoolAccountEvent(WhirlpoolAccountEvent),
-    WhirlpoolTickArrayAccountEvent(WhirlpoolTickArrayAccountEvent),
-
-    // Common events
-    TokenAccountEvent(TokenAccountEvent),
-    NonceAccountEvent(NonceAccountEvent),
-    TokenInfoEvent(TokenInfoEvent),
-    BlockMetaEvent(BlockMetaEvent),
     SetComputeUnitLimitEvent(SetComputeUnitLimitEvent),
     SetComputeUnitPriceEvent(SetComputeUnitPriceEvent),
 }
-
-impl DexEvent {
+impl TxEvent {
     pub fn metadata(&self) -> &EventMetadata {
         match self {
-            DexEvent::PancakeSwapSwapEvent(e) => &e.metadata,
-            DexEvent::PancakeSwapSwapV2Event(e) => &e.metadata,
-            DexEvent::PancakeSwapPoolStateAccountEvent(e) => &e.metadata,
-            DexEvent::PancakeSwapTickArrayStateAccountEvent(e) => &e.metadata,
-            DexEvent::PancakeSwapTickArrayBitmapExtensionAccountEvent(e) => &e.metadata,
-            DexEvent::BonkTradeEvent(e) => &e.metadata,
-            DexEvent::BonkPoolCreateEvent(e) => &e.metadata,
-            DexEvent::BonkMigrateToAmmEvent(e) => &e.metadata,
-            DexEvent::BonkMigrateToCpswapEvent(e) => &e.metadata,
-            DexEvent::BonkPoolStateAccountEvent(e) => &e.metadata,
-            DexEvent::BonkGlobalConfigAccountEvent(e) => &e.metadata,
-            DexEvent::BonkPlatformConfigAccountEvent(e) => &e.metadata,
-            DexEvent::PumpFunCreateTokenEvent(e) => &e.metadata,
-            DexEvent::PumpFunCreateV2TokenEvent(e) => &e.metadata,
-            DexEvent::PumpFunTradeEvent(e) => &e.metadata,
-            DexEvent::PumpFunMigrateEvent(e) => &e.metadata,
-            DexEvent::PumpFunBondingCurveAccountEvent(e) => &e.metadata,
-            DexEvent::PumpFunGlobalAccountEvent(e) => &e.metadata,
-            DexEvent::PumpSwapBuyEvent(e) => &e.metadata,
-            DexEvent::PumpSwapBuyExactQuoteInEvent(e) => &e.metadata,
-            DexEvent::PumpSwapSellEvent(e) => &e.metadata,
-            DexEvent::PumpSwapCreatePoolEvent(e) => &e.metadata,
-            DexEvent::PumpSwapInitBoostEvent(e) => &e.metadata,
-            DexEvent::PumpSwapDepositEvent(e) => &e.metadata,
-            DexEvent::PumpSwapWithdrawEvent(e) => &e.metadata,
-            DexEvent::PumpSwapGlobalConfigAccountEvent(e) => &e.metadata,
-            DexEvent::PumpSwapPoolAccountEvent(e) => &e.metadata,
-            DexEvent::RaydiumAmmV4SwapEvent(e) => &e.metadata,
-            DexEvent::RaydiumAmmV4DepositEvent(e) => &e.metadata,
-            DexEvent::RaydiumAmmV4WithdrawEvent(e) => &e.metadata,
-            DexEvent::RaydiumAmmV4WithdrawPnlEvent(e) => &e.metadata,
-            DexEvent::RaydiumAmmV4Initialize2Event(e) => &e.metadata,
-            DexEvent::RaydiumAmmV4AmmInfoAccountEvent(e) => &e.metadata,
-            DexEvent::RaydiumClmmSwapEvent(e) => &e.metadata,
-            DexEvent::RaydiumClmmSwapV2Event(e) => &e.metadata,
-            DexEvent::RaydiumClmmInstructionEvent(e) => &e.metadata,
-            DexEvent::RaydiumClmmClosePositionEvent(e) => &e.metadata,
-            DexEvent::RaydiumClmmIncreaseLiquidityV2Event(e) => &e.metadata,
-            DexEvent::RaydiumClmmDecreaseLiquidityV2Event(e) => &e.metadata,
-            DexEvent::RaydiumClmmCreatePoolEvent(e) => &e.metadata,
-            DexEvent::RaydiumClmmOpenPositionWithToken22NftEvent(e) => &e.metadata,
-            DexEvent::RaydiumClmmOpenPositionV2Event(e) => &e.metadata,
-            DexEvent::RaydiumClmmAmmConfigAccountEvent(e) => &e.metadata,
-            DexEvent::RaydiumClmmPoolStateAccountEvent(e) => &e.metadata,
-            DexEvent::RaydiumClmmTickArrayStateAccountEvent(e) => &e.metadata,
-            DexEvent::RaydiumClmmTickArrayBitmapExtensionAccountEvent(e) => &e.metadata,
-            DexEvent::RaydiumCpmmSwapEvent(e) => &e.metadata,
-            DexEvent::RaydiumCpmmDepositEvent(e) => &e.metadata,
-            DexEvent::RaydiumCpmmWithdrawEvent(e) => &e.metadata,
-            DexEvent::RaydiumCpmmInitializeEvent(e) => &e.metadata,
-            DexEvent::RaydiumCpmmAmmConfigAccountEvent(e) => &e.metadata,
-            DexEvent::RaydiumCpmmPoolStateAccountEvent(e) => &e.metadata,
-            DexEvent::MeteoraDammV2SwapEvent(e) => &e.metadata,
-            DexEvent::MeteoraDammV2Swap2Event(e) => &e.metadata,
-            DexEvent::MeteoraDammV2InitializePoolEvent(e) => &e.metadata,
-            DexEvent::MeteoraDammV2InitializeCustomizablePoolEvent(e) => &e.metadata,
-            DexEvent::MeteoraDammV2InitializePoolWithDynamicConfigEvent(e) => &e.metadata,
-            DexEvent::MeteoraDammV2LiquidityChangeEvent(e) => &e.metadata,
-            DexEvent::MeteoraDammV2InstructionEvent(e) => &e.metadata,
-            DexEvent::MeteoraDammV2PoolStateAccountEvent(e) => &e.metadata,
-            DexEvent::MeteoraDlmmSwapEvent(e) => &e.metadata,
-            DexEvent::MeteoraDlmmSwap2Event(e) => &e.metadata,
-            DexEvent::MeteoraDlmmInstructionEvent(e) => &e.metadata,
-            DexEvent::MeteoraDlmmLbPairAccountEvent(e) => &e.metadata,
-            DexEvent::MeteoraDlmmBinArrayAccountEvent(e) => &e.metadata,
-            DexEvent::MeteoraDlmmBinArrayBitmapExtensionAccountEvent(e) => &e.metadata,
-            DexEvent::WhirlpoolSwapEvent(e) => &e.metadata,
-            DexEvent::WhirlpoolSwapV2Event(e) => &e.metadata,
-            DexEvent::WhirlpoolInstructionEvent(e) => &e.metadata,
-            DexEvent::WhirlpoolAccountEvent(e) => &e.metadata,
-            DexEvent::WhirlpoolTickArrayAccountEvent(e) => &e.metadata,
-            DexEvent::TokenAccountEvent(e) => &e.metadata,
-            DexEvent::NonceAccountEvent(e) => &e.metadata,
-            DexEvent::TokenInfoEvent(e) => &e.metadata,
-            DexEvent::BlockMetaEvent(e) => &e.metadata,
-            DexEvent::SetComputeUnitLimitEvent(e) => &e.metadata,
-            DexEvent::SetComputeUnitPriceEvent(e) => &e.metadata,
+            Self::PancakeSwapSwapEvent(e) => &e.metadata,
+            Self::PancakeSwapSwapV2Event(e) => &e.metadata,
+            Self::BonkTradeEvent(e) => &e.metadata,
+            Self::BonkPoolCreateEvent(e) => &e.metadata,
+            Self::BonkMigrateToAmmEvent(e) => &e.metadata,
+            Self::BonkMigrateToCpswapEvent(e) => &e.metadata,
+            Self::PumpFunCreateTokenEvent(e) => &e.metadata,
+            Self::PumpFunCreateV2TokenEvent(e) => &e.metadata,
+            Self::PumpFunTradeEvent(e) => &e.metadata,
+            Self::PumpFunMigrateEvent(e) => &e.metadata,
+            Self::PumpSwapBuyEvent(e) => &e.metadata,
+            Self::PumpSwapBuyExactQuoteInEvent(e) => &e.metadata,
+            Self::PumpSwapSellEvent(e) => &e.metadata,
+            Self::PumpSwapCreatePoolEvent(e) => &e.metadata,
+            Self::PumpSwapInitBoostEvent(e) => &e.metadata,
+            Self::PumpSwapDepositEvent(e) => &e.metadata,
+            Self::PumpSwapWithdrawEvent(e) => &e.metadata,
+            Self::RaydiumAmmV4SwapEvent(e) => &e.metadata,
+            Self::RaydiumAmmV4DepositEvent(e) => &e.metadata,
+            Self::RaydiumAmmV4WithdrawEvent(e) => &e.metadata,
+            Self::RaydiumAmmV4WithdrawPnlEvent(e) => &e.metadata,
+            Self::RaydiumAmmV4Initialize2Event(e) => &e.metadata,
+            Self::RaydiumClmmSwapEvent(e) => &e.metadata,
+            Self::RaydiumClmmSwapV2Event(e) => &e.metadata,
+            Self::RaydiumClmmInstructionEvent(e) => &e.metadata,
+            Self::RaydiumClmmClosePositionEvent(e) => &e.metadata,
+            Self::RaydiumClmmIncreaseLiquidityV2Event(e) => &e.metadata,
+            Self::RaydiumClmmDecreaseLiquidityV2Event(e) => &e.metadata,
+            Self::RaydiumClmmCreatePoolEvent(e) => &e.metadata,
+            Self::RaydiumClmmOpenPositionWithToken22NftEvent(e) => &e.metadata,
+            Self::RaydiumClmmOpenPositionV2Event(e) => &e.metadata,
+            Self::RaydiumCpmmSwapEvent(e) => &e.metadata,
+            Self::RaydiumCpmmDepositEvent(e) => &e.metadata,
+            Self::RaydiumCpmmWithdrawEvent(e) => &e.metadata,
+            Self::RaydiumCpmmInitializeEvent(e) => &e.metadata,
+            Self::MeteoraDammV2SwapEvent(e) => &e.metadata,
+            Self::MeteoraDammV2Swap2Event(e) => &e.metadata,
+            Self::MeteoraDammV2InitializePoolEvent(e) => &e.metadata,
+            Self::MeteoraDammV2InitializeCustomizablePoolEvent(e) => &e.metadata,
+            Self::MeteoraDammV2InitializePoolWithDynamicConfigEvent(e) => &e.metadata,
+            Self::MeteoraDammV2LiquidityChangeEvent(e) => &e.metadata,
+            Self::MeteoraDammV2InstructionEvent(e) => &e.metadata,
+            Self::MeteoraDlmmSwapEvent(e) => &e.metadata,
+            Self::MeteoraDlmmSwap2Event(e) => &e.metadata,
+            Self::MeteoraDlmmInstructionEvent(e) => &e.metadata,
+            Self::WhirlpoolSwapEvent(e) => &e.metadata,
+            Self::WhirlpoolSwapV2Event(e) => &e.metadata,
+            Self::WhirlpoolInstructionEvent(e) => &e.metadata,
+            Self::SetComputeUnitLimitEvent(e) => &e.metadata,
+            Self::SetComputeUnitPriceEvent(e) => &e.metadata,
         }
     }
-
     pub fn metadata_mut(&mut self) -> &mut EventMetadata {
         match self {
-            DexEvent::PancakeSwapSwapEvent(e) => &mut e.metadata,
-            DexEvent::PancakeSwapSwapV2Event(e) => &mut e.metadata,
-            DexEvent::PancakeSwapPoolStateAccountEvent(e) => &mut e.metadata,
-            DexEvent::PancakeSwapTickArrayStateAccountEvent(e) => &mut e.metadata,
-            DexEvent::PancakeSwapTickArrayBitmapExtensionAccountEvent(e) => &mut e.metadata,
-            DexEvent::BonkTradeEvent(e) => &mut e.metadata,
-            DexEvent::BonkPoolCreateEvent(e) => &mut e.metadata,
-            DexEvent::BonkMigrateToAmmEvent(e) => &mut e.metadata,
-            DexEvent::BonkMigrateToCpswapEvent(e) => &mut e.metadata,
-            DexEvent::BonkPoolStateAccountEvent(e) => &mut e.metadata,
-            DexEvent::BonkGlobalConfigAccountEvent(e) => &mut e.metadata,
-            DexEvent::BonkPlatformConfigAccountEvent(e) => &mut e.metadata,
-            DexEvent::PumpFunCreateTokenEvent(e) => &mut e.metadata,
-            DexEvent::PumpFunCreateV2TokenEvent(e) => &mut e.metadata,
-            DexEvent::PumpFunTradeEvent(e) => &mut e.metadata,
-            DexEvent::PumpFunMigrateEvent(e) => &mut e.metadata,
-            DexEvent::PumpFunBondingCurveAccountEvent(e) => &mut e.metadata,
-            DexEvent::PumpFunGlobalAccountEvent(e) => &mut e.metadata,
-            DexEvent::PumpSwapBuyEvent(e) => &mut e.metadata,
-            DexEvent::PumpSwapBuyExactQuoteInEvent(e) => &mut e.metadata,
-            DexEvent::PumpSwapSellEvent(e) => &mut e.metadata,
-            DexEvent::PumpSwapCreatePoolEvent(e) => &mut e.metadata,
-            DexEvent::PumpSwapInitBoostEvent(e) => &mut e.metadata,
-            DexEvent::PumpSwapDepositEvent(e) => &mut e.metadata,
-            DexEvent::PumpSwapWithdrawEvent(e) => &mut e.metadata,
-            DexEvent::PumpSwapGlobalConfigAccountEvent(e) => &mut e.metadata,
-            DexEvent::PumpSwapPoolAccountEvent(e) => &mut e.metadata,
-            DexEvent::RaydiumAmmV4SwapEvent(e) => &mut e.metadata,
-            DexEvent::RaydiumAmmV4DepositEvent(e) => &mut e.metadata,
-            DexEvent::RaydiumAmmV4WithdrawEvent(e) => &mut e.metadata,
-            DexEvent::RaydiumAmmV4WithdrawPnlEvent(e) => &mut e.metadata,
-            DexEvent::RaydiumAmmV4Initialize2Event(e) => &mut e.metadata,
-            DexEvent::RaydiumAmmV4AmmInfoAccountEvent(e) => &mut e.metadata,
-            DexEvent::RaydiumClmmSwapEvent(e) => &mut e.metadata,
-            DexEvent::RaydiumClmmSwapV2Event(e) => &mut e.metadata,
-            DexEvent::RaydiumClmmInstructionEvent(e) => &mut e.metadata,
-            DexEvent::RaydiumClmmClosePositionEvent(e) => &mut e.metadata,
-            DexEvent::RaydiumClmmIncreaseLiquidityV2Event(e) => &mut e.metadata,
-            DexEvent::RaydiumClmmDecreaseLiquidityV2Event(e) => &mut e.metadata,
-            DexEvent::RaydiumClmmCreatePoolEvent(e) => &mut e.metadata,
-            DexEvent::RaydiumClmmOpenPositionWithToken22NftEvent(e) => &mut e.metadata,
-            DexEvent::RaydiumClmmOpenPositionV2Event(e) => &mut e.metadata,
-            DexEvent::RaydiumClmmAmmConfigAccountEvent(e) => &mut e.metadata,
-            DexEvent::RaydiumClmmPoolStateAccountEvent(e) => &mut e.metadata,
-            DexEvent::RaydiumClmmTickArrayStateAccountEvent(e) => &mut e.metadata,
-            DexEvent::RaydiumClmmTickArrayBitmapExtensionAccountEvent(e) => &mut e.metadata,
-            DexEvent::RaydiumCpmmSwapEvent(e) => &mut e.metadata,
-            DexEvent::RaydiumCpmmDepositEvent(e) => &mut e.metadata,
-            DexEvent::RaydiumCpmmWithdrawEvent(e) => &mut e.metadata,
-            DexEvent::RaydiumCpmmInitializeEvent(e) => &mut e.metadata,
-            DexEvent::RaydiumCpmmAmmConfigAccountEvent(e) => &mut e.metadata,
-            DexEvent::RaydiumCpmmPoolStateAccountEvent(e) => &mut e.metadata,
-            DexEvent::MeteoraDammV2SwapEvent(e) => &mut e.metadata,
-            DexEvent::MeteoraDammV2Swap2Event(e) => &mut e.metadata,
-            DexEvent::MeteoraDammV2InitializePoolEvent(e) => &mut e.metadata,
-            DexEvent::MeteoraDammV2InitializeCustomizablePoolEvent(e) => &mut e.metadata,
-            DexEvent::MeteoraDammV2InitializePoolWithDynamicConfigEvent(e) => &mut e.metadata,
-            DexEvent::MeteoraDammV2LiquidityChangeEvent(e) => &mut e.metadata,
-            DexEvent::MeteoraDammV2InstructionEvent(e) => &mut e.metadata,
-            DexEvent::MeteoraDammV2PoolStateAccountEvent(e) => &mut e.metadata,
-            DexEvent::MeteoraDlmmSwapEvent(e) => &mut e.metadata,
-            DexEvent::MeteoraDlmmSwap2Event(e) => &mut e.metadata,
-            DexEvent::MeteoraDlmmInstructionEvent(e) => &mut e.metadata,
-            DexEvent::MeteoraDlmmLbPairAccountEvent(e) => &mut e.metadata,
-            DexEvent::MeteoraDlmmBinArrayAccountEvent(e) => &mut e.metadata,
-            DexEvent::MeteoraDlmmBinArrayBitmapExtensionAccountEvent(e) => &mut e.metadata,
-            DexEvent::WhirlpoolSwapEvent(e) => &mut e.metadata,
-            DexEvent::WhirlpoolSwapV2Event(e) => &mut e.metadata,
-            DexEvent::WhirlpoolInstructionEvent(e) => &mut e.metadata,
-            DexEvent::WhirlpoolAccountEvent(e) => &mut e.metadata,
-            DexEvent::WhirlpoolTickArrayAccountEvent(e) => &mut e.metadata,
-            DexEvent::TokenAccountEvent(e) => &mut e.metadata,
-            DexEvent::NonceAccountEvent(e) => &mut e.metadata,
-            DexEvent::TokenInfoEvent(e) => &mut e.metadata,
-            DexEvent::BlockMetaEvent(e) => &mut e.metadata,
-            DexEvent::SetComputeUnitLimitEvent(e) => &mut e.metadata,
-            DexEvent::SetComputeUnitPriceEvent(e) => &mut e.metadata,
+            Self::PancakeSwapSwapEvent(e) => &mut e.metadata,
+            Self::PancakeSwapSwapV2Event(e) => &mut e.metadata,
+            Self::BonkTradeEvent(e) => &mut e.metadata,
+            Self::BonkPoolCreateEvent(e) => &mut e.metadata,
+            Self::BonkMigrateToAmmEvent(e) => &mut e.metadata,
+            Self::BonkMigrateToCpswapEvent(e) => &mut e.metadata,
+            Self::PumpFunCreateTokenEvent(e) => &mut e.metadata,
+            Self::PumpFunCreateV2TokenEvent(e) => &mut e.metadata,
+            Self::PumpFunTradeEvent(e) => &mut e.metadata,
+            Self::PumpFunMigrateEvent(e) => &mut e.metadata,
+            Self::PumpSwapBuyEvent(e) => &mut e.metadata,
+            Self::PumpSwapBuyExactQuoteInEvent(e) => &mut e.metadata,
+            Self::PumpSwapSellEvent(e) => &mut e.metadata,
+            Self::PumpSwapCreatePoolEvent(e) => &mut e.metadata,
+            Self::PumpSwapInitBoostEvent(e) => &mut e.metadata,
+            Self::PumpSwapDepositEvent(e) => &mut e.metadata,
+            Self::PumpSwapWithdrawEvent(e) => &mut e.metadata,
+            Self::RaydiumAmmV4SwapEvent(e) => &mut e.metadata,
+            Self::RaydiumAmmV4DepositEvent(e) => &mut e.metadata,
+            Self::RaydiumAmmV4WithdrawEvent(e) => &mut e.metadata,
+            Self::RaydiumAmmV4WithdrawPnlEvent(e) => &mut e.metadata,
+            Self::RaydiumAmmV4Initialize2Event(e) => &mut e.metadata,
+            Self::RaydiumClmmSwapEvent(e) => &mut e.metadata,
+            Self::RaydiumClmmSwapV2Event(e) => &mut e.metadata,
+            Self::RaydiumClmmInstructionEvent(e) => &mut e.metadata,
+            Self::RaydiumClmmClosePositionEvent(e) => &mut e.metadata,
+            Self::RaydiumClmmIncreaseLiquidityV2Event(e) => &mut e.metadata,
+            Self::RaydiumClmmDecreaseLiquidityV2Event(e) => &mut e.metadata,
+            Self::RaydiumClmmCreatePoolEvent(e) => &mut e.metadata,
+            Self::RaydiumClmmOpenPositionWithToken22NftEvent(e) => &mut e.metadata,
+            Self::RaydiumClmmOpenPositionV2Event(e) => &mut e.metadata,
+            Self::RaydiumCpmmSwapEvent(e) => &mut e.metadata,
+            Self::RaydiumCpmmDepositEvent(e) => &mut e.metadata,
+            Self::RaydiumCpmmWithdrawEvent(e) => &mut e.metadata,
+            Self::RaydiumCpmmInitializeEvent(e) => &mut e.metadata,
+            Self::MeteoraDammV2SwapEvent(e) => &mut e.metadata,
+            Self::MeteoraDammV2Swap2Event(e) => &mut e.metadata,
+            Self::MeteoraDammV2InitializePoolEvent(e) => &mut e.metadata,
+            Self::MeteoraDammV2InitializeCustomizablePoolEvent(e) => &mut e.metadata,
+            Self::MeteoraDammV2InitializePoolWithDynamicConfigEvent(e) => &mut e.metadata,
+            Self::MeteoraDammV2LiquidityChangeEvent(e) => &mut e.metadata,
+            Self::MeteoraDammV2InstructionEvent(e) => &mut e.metadata,
+            Self::MeteoraDlmmSwapEvent(e) => &mut e.metadata,
+            Self::MeteoraDlmmSwap2Event(e) => &mut e.metadata,
+            Self::MeteoraDlmmInstructionEvent(e) => &mut e.metadata,
+            Self::WhirlpoolSwapEvent(e) => &mut e.metadata,
+            Self::WhirlpoolSwapV2Event(e) => &mut e.metadata,
+            Self::WhirlpoolInstructionEvent(e) => &mut e.metadata,
+            Self::SetComputeUnitLimitEvent(e) => &mut e.metadata,
+            Self::SetComputeUnitPriceEvent(e) => &mut e.metadata,
+        }
+    }
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum AccountEvent {
+    PancakeSwapPoolStateAccountEvent(PancakeSwapPoolStateAccountEvent),
+    PancakeSwapTickArrayStateAccountEvent(PancakeSwapTickArrayStateAccountEvent),
+    PancakeSwapTickArrayBitmapExtensionAccountEvent(
+        PancakeSwapTickArrayBitmapExtensionAccountEvent,
+    ),
+    BonkPoolStateAccountEvent(BonkPoolStateAccountEvent),
+    BonkGlobalConfigAccountEvent(BonkGlobalConfigAccountEvent),
+    BonkPlatformConfigAccountEvent(BonkPlatformConfigAccountEvent),
+    PumpFunBondingCurveAccountEvent(PumpFunBondingCurveAccountEvent),
+    PumpFunGlobalAccountEvent(PumpFunGlobalAccountEvent),
+    PumpSwapGlobalConfigAccountEvent(PumpSwapGlobalConfigAccountEvent),
+    PumpSwapPoolAccountEvent(PumpSwapPoolAccountEvent),
+    RaydiumAmmV4AmmInfoAccountEvent(RaydiumAmmV4AmmInfoAccountEvent),
+    RaydiumClmmAmmConfigAccountEvent(RaydiumClmmAmmConfigAccountEvent),
+    RaydiumClmmPoolStateAccountEvent(RaydiumClmmPoolStateAccountEvent),
+    RaydiumClmmTickArrayStateAccountEvent(RaydiumClmmTickArrayStateAccountEvent),
+    RaydiumClmmTickArrayBitmapExtensionAccountEvent(
+        RaydiumClmmTickArrayBitmapExtensionAccountEvent,
+    ),
+    RaydiumCpmmAmmConfigAccountEvent(RaydiumCpmmAmmConfigAccountEvent),
+    RaydiumCpmmPoolStateAccountEvent(RaydiumCpmmPoolStateAccountEvent),
+    MeteoraDammV2PoolStateAccountEvent(MeteoraDammV2PoolStateAccountEvent),
+    MeteoraDlmmLbPairAccountEvent(MeteoraDlmmLbPairAccountEvent),
+    MeteoraDlmmBinArrayAccountEvent(MeteoraDlmmBinArrayAccountEvent),
+    MeteoraDlmmBinArrayBitmapExtensionAccountEvent(MeteoraDlmmBinArrayBitmapExtensionAccountEvent),
+    WhirlpoolAccountEvent(WhirlpoolAccountEvent),
+    WhirlpoolTickArrayAccountEvent(WhirlpoolTickArrayAccountEvent),
+    TokenAccountEvent(TokenAccountEvent),
+    NonceAccountEvent(NonceAccountEvent),
+    TokenInfoEvent(TokenInfoEvent),
+}
+impl AccountEvent {
+    pub fn metadata(&self) -> &EventMetadata {
+        match self {
+            Self::PancakeSwapPoolStateAccountEvent(e) => &e.metadata,
+            Self::PancakeSwapTickArrayStateAccountEvent(e) => &e.metadata,
+            Self::PancakeSwapTickArrayBitmapExtensionAccountEvent(e) => &e.metadata,
+            Self::BonkPoolStateAccountEvent(e) => &e.metadata,
+            Self::BonkGlobalConfigAccountEvent(e) => &e.metadata,
+            Self::BonkPlatformConfigAccountEvent(e) => &e.metadata,
+            Self::PumpFunBondingCurveAccountEvent(e) => &e.metadata,
+            Self::PumpFunGlobalAccountEvent(e) => &e.metadata,
+            Self::PumpSwapGlobalConfigAccountEvent(e) => &e.metadata,
+            Self::PumpSwapPoolAccountEvent(e) => &e.metadata,
+            Self::RaydiumAmmV4AmmInfoAccountEvent(e) => &e.metadata,
+            Self::RaydiumClmmAmmConfigAccountEvent(e) => &e.metadata,
+            Self::RaydiumClmmPoolStateAccountEvent(e) => &e.metadata,
+            Self::RaydiumClmmTickArrayStateAccountEvent(e) => &e.metadata,
+            Self::RaydiumClmmTickArrayBitmapExtensionAccountEvent(e) => &e.metadata,
+            Self::RaydiumCpmmAmmConfigAccountEvent(e) => &e.metadata,
+            Self::RaydiumCpmmPoolStateAccountEvent(e) => &e.metadata,
+            Self::MeteoraDammV2PoolStateAccountEvent(e) => &e.metadata,
+            Self::MeteoraDlmmLbPairAccountEvent(e) => &e.metadata,
+            Self::MeteoraDlmmBinArrayAccountEvent(e) => &e.metadata,
+            Self::MeteoraDlmmBinArrayBitmapExtensionAccountEvent(e) => &e.metadata,
+            Self::WhirlpoolAccountEvent(e) => &e.metadata,
+            Self::WhirlpoolTickArrayAccountEvent(e) => &e.metadata,
+            Self::TokenAccountEvent(e) => &e.metadata,
+            Self::NonceAccountEvent(e) => &e.metadata,
+            Self::TokenInfoEvent(e) => &e.metadata,
+        }
+    }
+    pub fn metadata_mut(&mut self) -> &mut EventMetadata {
+        match self {
+            Self::PancakeSwapPoolStateAccountEvent(e) => &mut e.metadata,
+            Self::PancakeSwapTickArrayStateAccountEvent(e) => &mut e.metadata,
+            Self::PancakeSwapTickArrayBitmapExtensionAccountEvent(e) => &mut e.metadata,
+            Self::BonkPoolStateAccountEvent(e) => &mut e.metadata,
+            Self::BonkGlobalConfigAccountEvent(e) => &mut e.metadata,
+            Self::BonkPlatformConfigAccountEvent(e) => &mut e.metadata,
+            Self::PumpFunBondingCurveAccountEvent(e) => &mut e.metadata,
+            Self::PumpFunGlobalAccountEvent(e) => &mut e.metadata,
+            Self::PumpSwapGlobalConfigAccountEvent(e) => &mut e.metadata,
+            Self::PumpSwapPoolAccountEvent(e) => &mut e.metadata,
+            Self::RaydiumAmmV4AmmInfoAccountEvent(e) => &mut e.metadata,
+            Self::RaydiumClmmAmmConfigAccountEvent(e) => &mut e.metadata,
+            Self::RaydiumClmmPoolStateAccountEvent(e) => &mut e.metadata,
+            Self::RaydiumClmmTickArrayStateAccountEvent(e) => &mut e.metadata,
+            Self::RaydiumClmmTickArrayBitmapExtensionAccountEvent(e) => &mut e.metadata,
+            Self::RaydiumCpmmAmmConfigAccountEvent(e) => &mut e.metadata,
+            Self::RaydiumCpmmPoolStateAccountEvent(e) => &mut e.metadata,
+            Self::MeteoraDammV2PoolStateAccountEvent(e) => &mut e.metadata,
+            Self::MeteoraDlmmLbPairAccountEvent(e) => &mut e.metadata,
+            Self::MeteoraDlmmBinArrayAccountEvent(e) => &mut e.metadata,
+            Self::MeteoraDlmmBinArrayBitmapExtensionAccountEvent(e) => &mut e.metadata,
+            Self::WhirlpoolAccountEvent(e) => &mut e.metadata,
+            Self::WhirlpoolTickArrayAccountEvent(e) => &mut e.metadata,
+            Self::TokenAccountEvent(e) => &mut e.metadata,
+            Self::NonceAccountEvent(e) => &mut e.metadata,
+            Self::TokenInfoEvent(e) => &mut e.metadata,
         }
     }
 }

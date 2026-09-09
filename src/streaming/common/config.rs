@@ -1,5 +1,4 @@
 use super::constants::*;
-use crate::streaming::event_parser::common::SwapCuParseConfig;
 
 /// Connection configuration
 #[derive(Debug, Clone)]
@@ -29,19 +28,10 @@ pub struct StreamClientConfig {
     pub connection: ConnectionConfig,
     /// Whether performance monitoring is enabled (default: false)
     pub enable_metrics: bool,
-    /// Optional swap compute-unit parsing. None means no CU log parsing overhead.
-    pub swap_cu_parse_config: Option<SwapCuParseConfig>,
-    /// Preserve pre/post token balances for transaction execution auditing.
-    pub tx_exec_meta_audit: bool,
 }
 
 impl Default for StreamClientConfig {
     fn default() -> Self {
-        Self {
-            connection: ConnectionConfig::default(),
-            enable_metrics: false,
-            swap_cu_parse_config: None,
-            tx_exec_meta_audit: false,
-        }
+        Self { connection: ConnectionConfig::default(), enable_metrics: false }
     }
 }

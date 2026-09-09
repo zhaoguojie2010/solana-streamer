@@ -6,9 +6,9 @@ use crate::streaming::{
     event_parser::{
         common::{EventMetadata, EventType},
         protocols::raydium_amm_v4::RaydiumAmmV4AmmInfoAccountEvent,
-        DexEvent,
+        AccountEvent,
     },
-    grpc::AccountPretty,
+    grpc::AccountFrame,
 };
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, BorshDeserialize)]
@@ -87,14 +87,14 @@ pub fn amm_info_decode(data: &[u8]) -> Option<AmmInfo> {
     borsh::from_slice::<AmmInfo>(&data[..AMM_INFO_SIZE]).ok()
 }
 
-pub fn amm_info_parser(account: AccountPretty, mut metadata: EventMetadata) -> Option<DexEvent> {
+pub fn amm_info_parser(account: AccountFrame, mut metadata: EventMetadata) -> Option<AccountEvent> {
     metadata.event_type = EventType::AccountRaydiumAmmV4AmmInfo;
 
     if account.data.len() < AMM_INFO_SIZE {
         return None;
     }
     if let Some(amm_info) = amm_info_decode(&account.data[..AMM_INFO_SIZE]) {
-        Some(DexEvent::RaydiumAmmV4AmmInfoAccountEvent(RaydiumAmmV4AmmInfoAccountEvent {
+        Some(AccountEvent::RaydiumAmmV4AmmInfoAccountEvent(RaydiumAmmV4AmmInfoAccountEvent {
             metadata,
             pubkey: account.pubkey,
             executable: account.executable,

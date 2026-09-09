@@ -1,39 +1,21 @@
-use solana_sdk::{
-    message::{compiled_instruction::CompiledInstruction as SdkInstruction, v0, VersionedMessage},
-    pubkey::Pubkey,
-    signature::Signature,
-    transaction::VersionedTransaction,
-};
+mod support;
+use support::*;
+
+use solana_sdk::pubkey::Pubkey;
 use solana_streamer_sdk::streaming::{
     event_parser::{
-        common::{SwapCuInstructionMatcher, SwapCuParseConfig, SwapCuTarget},
-        core::event_parser::EventParser,
+        common::{EventType, SwapCuInstructionMatcher, SwapCuParseConfig, SwapCuTarget},
         protocols::whirlpool::{parser::WHIRLPOOL_PROGRAM_ID, WhirlpoolInstructionKind},
-        DexEvent, Protocol, TxExecutionStatus,
+        AccountEvent, ParseOptions, ParsePlan, Protocol, TxEvent, TxExecutionStatus, TxFrame,
+        TxParser,
     },
-    grpc::{
-        pool::{factory, AccountPrettyPool, BlockMetaPrettyPool, TransactionPrettyPool},
-        AccountPretty, BlockMetaPretty, TransactionPretty,
-    },
+    grpc::{AccountFrame, BlockMetaPretty, TransactionPretty},
 };
 use std::{
     alloc::{GlobalAlloc, Layout, System},
     cell::Cell,
-    future::Future,
-    sync::{Arc, Mutex},
-    task::{Context, Poll, Waker},
 };
-use yellowstone_grpc_proto::{prelude::*, prost_types::Timestamp};
-
-const COMPUTE_BUDGET: Pubkey = solana_sdk::pubkey!("ComputeBudget111111111111111111111111111111");
-const JITO_TIP: Pubkey = solana_sdk::pubkey!("96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5");
-const INITIALIZE_POOL: [u8; 8] = [95, 180, 10, 172, 84, 174, 232, 40];
-fn signature() -> Signature {
-    Signature::from([7; 64])
-}
-const BLOCK_TIME: Option<Timestamp> =
-    Some(Timestamp { seconds: 1_700_000_000, nanos: 123_000_000 });
-
+use yellowstone_grpc_proto::prelude::*;
 // Count only allocations made by the current test thread inside an explicit scope.
 // Other tests and the test runner can allocate concurrently without skewing measurements.
 #[derive(Clone, Copy, Debug, Default)]
@@ -96,320 +78,249 @@ fn measure<T>(operation: impl FnOnce() -> T) -> (T, Allocations) {
     (result, allocations)
 }
 
-// Parsing does no I/O. Polling directly keeps runtime initialization out of the measurements.
-fn parse_ready<F: Future>(future: F) -> F::Output {
-    let mut context = Context::from_waker(Waker::noop());
-    match std::pin::pin!(future).poll(&mut context) {
-        Poll::Ready(result) => result,
-        Poll::Pending => panic!("transaction parsing unexpectedly suspended"),
-    }
-}
-
-fn instruction(accounts: Vec<u8>, marker: u8) -> CompiledInstruction {
-    let mut data = INITIALIZE_POOL.to_vec();
-    data.extend_from_slice(&[marker, marker + 1]);
-    CompiledInstruction { program_id_index: 3, accounts, data }
-}
-
-fn fixture() -> SubscribeUpdateTransactionInfo {
-    let payer = Pubkey::new_from_array([1; 32]);
-    let token = Pubkey::new_from_array([2; 32]);
-    let pool = Pubkey::new_from_array([3; 32]);
-    let balance = |amount: &str| TokenBalance {
-        account_index: 4,
-        mint: Pubkey::new_from_array([4; 32]).to_string(),
-        owner: payer.to_string(),
-        program_id: spl_token::ID.to_string(),
-        ui_token_amount: Some(UiTokenAmount {
-            decimals: 6,
-            amount: amount.to_owned(),
-            ..Default::default()
-        }),
-    };
-    let inner = instruction(vec![4, 5, 0], 22);
-    let second_inner = instruction(vec![5, 4, 0], 33);
-    SubscribeUpdateTransactionInfo {
-        signature: signature().as_ref().to_vec(),
-        index: 9,
-        transaction: Some(Transaction {
-            message: Some(Message {
-                account_keys: [payer, Pubkey::default(), COMPUTE_BUDGET, WHIRLPOOL_PROGRAM_ID]
-                    .iter()
-                    .map(|key| key.to_bytes().to_vec())
-                    .collect(),
-                instructions: vec![
-                    CompiledInstruction {
-                        program_id_index: 2,
-                        data: [&[2][..], &200_000u32.to_le_bytes()].concat(),
-                        ..Default::default()
-                    },
-                    instruction(vec![5, 4, 0], 11),
-                    CompiledInstruction {
-                        program_id_index: 2,
-                        data: [&[3][..], &42u64.to_le_bytes()].concat(),
-                        ..Default::default()
-                    },
-                ],
-                versioned: true,
-                ..Default::default()
-            }),
-            ..Default::default()
-        }),
-        meta: Some(TransactionStatusMeta {
-            loaded_writable_addresses: vec![token.to_bytes().to_vec(), pool.to_bytes().to_vec()],
-            loaded_readonly_addresses: vec![JITO_TIP.to_bytes().to_vec()],
-            inner_instructions: vec![InnerInstructions {
-                index: 1,
-                instructions: vec![
-                    InnerInstruction {
-                        program_id_index: inner.program_id_index,
-                        accounts: inner.accounts,
-                        data: inner.data,
-                        stack_height: Some(2),
-                    },
-                    InnerInstruction {
-                        program_id_index: 1,
-                        accounts: vec![0, 6],
-                        data: [&2u32.to_le_bytes()[..], &5_000u64.to_le_bytes()].concat(),
-                        stack_height: Some(2),
-                    },
-                    InnerInstruction {
-                        program_id_index: second_inner.program_id_index,
-                        accounts: second_inner.accounts,
-                        data: second_inner.data,
-                        stack_height: Some(2),
-                    },
-                ],
-            }],
-            pre_token_balances: vec![balance("10")],
-            post_token_balances: vec![balance("20")],
-            ..Default::default()
-        }),
-        ..Default::default()
-    }
-}
-
-fn grpc_events(transaction: SubscribeUpdateTransactionInfo) -> Vec<DexEvent> {
-    let events = Arc::new(Mutex::new(Vec::new()));
-    let sink = Arc::clone(&events);
-    parse_ready(EventParser::parse_grpc_transaction(
-        &[Protocol::Whirlpool],
-        None,
-        transaction,
-        signature(),
-        Some(123),
-        BLOCK_TIME,
-        0,
-        None,
-        Some(9),
-        None,
-        Arc::new(move |event| sink.lock().unwrap().push(event)),
-    ))
-    .unwrap();
-    Arc::try_unwrap(events).unwrap().into_inner().unwrap()
-}
-
-fn normalize_times(events: &mut [DexEvent]) {
-    for event in events {
-        event.metadata_mut().handle_us = 0;
-    }
-}
-
 #[test]
-fn grpc_batch_preserves_events_loaded_keys_raw_instructions_and_audit() {
-    let mut single = grpc_events(fixture());
-    let mut batch = parse_ready(EventParser::parse_grpc_transaction_to_events(
-        &[Protocol::Whirlpool],
-        None,
-        fixture(),
-        signature(),
-        Some(123),
-        BLOCK_TIME,
-        0,
-        None,
-        Some(9),
-        None,
-        true,
-    ))
-    .unwrap()
-    .unwrap();
-    normalize_times(&mut single);
-    normalize_times(&mut batch.events);
-    assert_eq!(single, batch.events);
-    let indices: Vec<_> = single
-        .iter()
-        .map(|event| {
-            let metadata = event.metadata();
-            assert_eq!(metadata.signature, signature());
-            assert_eq!(metadata.slot, 123);
-            assert_eq!(metadata.block_time_ms, 1_700_000_000_123);
-            assert_eq!(metadata.transaction_index, Some(9));
-            (metadata.outer_index, metadata.inner_index)
-        })
-        .collect();
-    assert_eq!(indices, [(0, None), (1, None), (1, Some(0)), (1, Some(2)), (2, None)]);
-    assert_eq!(batch.execution_status, TxExecutionStatus::Success);
-    assert_eq!(batch.compute_unit_limit, Some(200_000));
-    assert_eq!(batch.compute_unit_price_micro_lamports, 42);
-    assert!(batch.compute_unit_price_set);
-    assert!(batch.has_jito_tip);
-    assert_eq!(batch.block_time, Some(1_700_000_000));
-    assert_eq!(batch.raw_dex_instructions.len(), 3);
-    for ((event, raw), marker) in
-        single[1..4].iter().zip(&batch.raw_dex_instructions).zip([11, 22, 33])
-    {
-        let DexEvent::WhirlpoolInstructionEvent(event) = event else { panic!("wrong event") };
-        assert_eq!(event.kind, WhirlpoolInstructionKind::InitializePool);
-        assert_eq!(event.accounts, raw.accounts);
-        assert_eq!(event.data, [marker, marker + 1]);
-        assert_eq!(&raw.data[..8], &INITIALIZE_POOL);
-        assert_eq!(&raw.data[8..], &event.data);
-        assert_eq!(raw.outer_index, event.metadata.outer_index as u32);
-        assert_eq!(raw.inner_index, event.metadata.inner_index.map(|index| index as u32));
-        assert_eq!(raw.stack_height, raw.inner_index.map(|_| 2));
+fn batch_preserves_order_common_metadata_raw_buffers_and_execution_audit() {
+    let info = fixture();
+    let raw_pointer =
+        info.transaction.as_ref().unwrap().message.as_ref().unwrap().instructions[1].data.as_ptr();
+    let frame = frame(info);
+    assert_eq!(frame.instruction(1).unwrap().data.as_ptr(), raw_pointer);
+    let mut parser = TxParser::default();
+    let plan = plan(ParseOptions {
+        retain_instructions: true,
+        balance_audit: true,
+        compute_budget: true,
+        detect_jito: true,
+        ..ParseOptions::default()
+    });
+    let batch = parser.parse_owned(frame, &plan).unwrap().unwrap();
+    assert_eq!(batch.meta.signature, signature());
+    assert_eq!(batch.meta.slot, 123);
+    assert_eq!(batch.meta.transaction_index, Some(9));
+    assert_eq!(batch.meta.block_time_ms, 1_700_000_000_123);
+    assert_eq!(batch.meta.execution_status, TxExecutionStatus::Success);
+    assert_eq!(
+        batch
+            .events
+            .iter()
+            .map(|e| (e.metadata().outer_index, e.metadata().inner_index))
+            .collect::<Vec<_>>(),
+        [(0, None), (1, None), (1, Some(0)), (1, Some(2)), (2, None)]
+    );
+    assert_eq!(batch.summary.compute_unit_limit, Some(200_000));
+    assert_eq!(batch.summary.compute_unit_price, Some(42));
+    assert_eq!(batch.summary.is_jito, Some(true));
+    assert_eq!(batch.instruction(1).unwrap().data.as_ptr(), raw_pointer);
+    for (event, marker) in batch.events[1..4].iter().zip([11, 22, 33]) {
+        let TxEvent::WhirlpoolInstructionEvent(e) = event else { panic!("wrong event") };
+        assert_eq!(e.kind, WhirlpoolInstructionKind::InitializePool);
+        let raw = batch.instruction(e.metadata.instruction_index).unwrap();
+        assert_eq!(raw.data[8..], [marker, marker + 1]);
         assert_eq!(raw.accounts[2], Pubkey::new_from_array([1; 32]));
     }
-    assert_eq!(batch.raw_dex_instructions[0].account_indices, [5, 4, 0]);
-    assert_eq!(
-        batch.raw_dex_instructions[0].accounts[..2],
-        [Pubkey::new_from_array([3; 32]), Pubkey::new_from_array([2; 32])]
-    );
-    let audit = batch.tx_exec_meta.unwrap();
+    let raw = batch.instruction(1).unwrap();
+    assert_eq!(raw.account_indices, [5, 4, 0]);
+    assert_eq!(raw.accounts[0], Pubkey::new_from_array([3; 32]));
+    let audit = batch.audit.unwrap();
     assert!(audit.parse_errors.is_empty());
     assert_eq!(audit.token_balance_changes.len(), 1);
-    let change = &audit.token_balance_changes[0];
-    assert_eq!(change.account_index, 4);
-    assert_eq!(change.account, Some(Pubkey::new_from_array([2; 32])));
-    assert_eq!(change.pre_amount, Some(10));
-    assert_eq!(change.post_amount, Some(20));
+    assert_eq!(audit.token_balance_changes[0].account, Some(Pubkey::new_from_array([2; 32])));
+    assert_eq!(audit.token_balance_changes[0].pre_amount, Some(10));
+    assert_eq!(audit.token_balance_changes[0].post_amount, Some(20));
 }
 
 #[test]
-fn versioned_batch_matches_grpc_order_and_preserves_borrowed_accounts() {
-    let source = fixture();
-    let message = source.transaction.as_ref().unwrap().message.as_ref().unwrap();
-    let meta = source.meta.as_ref().unwrap();
-    let accounts: Vec<Pubkey> = message
-        .account_keys
-        .iter()
-        .chain(&meta.loaded_writable_addresses)
-        .chain(&meta.loaded_readonly_addresses)
-        .map(|key| Pubkey::try_from(key.as_slice()).unwrap())
-        .collect();
-    let transaction = VersionedTransaction {
-        signatures: vec![signature()],
-        message: VersionedMessage::V0(v0::Message {
-            account_keys: accounts[..4].to_vec(),
-            instructions: message
-                .instructions
-                .iter()
-                .map(|ix| SdkInstruction {
-                    program_id_index: ix.program_id_index as u8,
-                    accounts: ix.accounts.clone(),
-                    data: ix.data.clone(),
-                })
-                .collect(),
-            ..Default::default()
+fn borrowed_and_owned_paths_match_without_cloning_the_source() {
+    let input = frame(fixture());
+    let plan = plan(ParseOptions::default());
+    let mut parser = TxParser::default();
+    let mut copy = None;
+    parser
+        .visit(&input, &plan, |view| {
+            assert_eq!(view.keys.as_ptr(), input.keys().as_ptr());
+            assert_eq!(
+                view.instruction(1).unwrap().data.as_ptr(),
+                input.instruction(1).unwrap().data.as_ptr()
+            );
+            copy = Some(view.to_owned());
+        })
+        .unwrap();
+    let owned = parser.parse_owned(input, &plan).unwrap();
+    assert_eq!(owned, copy);
+}
+
+#[test]
+fn versioned_and_grpc_adapters_share_order_and_source_semantics() {
+    use solana_streamer_sdk::streaming::event_parser::TxMetadata;
+    let (tx, keys, meta) = versioned_fixture();
+    let frame = TxFrame::from_versioned(
+        tx,
+        keys,
+        meta.inner_instructions,
+        vec![],
+        TxMetadata {
+            slot: 123,
+            block_time: 1_700_000_000,
+            block_time_ms: 1_700_000_000_123,
+            transaction_index: Some(9),
+            ..TxMetadata::default()
+        },
+    )
+    .unwrap();
+    let mut parser = TxParser::default();
+    let versioned = parser.parse_owned(frame, &plan(ParseOptions::default())).unwrap().unwrap();
+    let grpc = parser
+        .parse_owned(crate::frame(fixture()), &plan(ParseOptions::default()))
+        .unwrap()
+        .unwrap();
+    assert_eq!(versioned.meta.execution_status, TxExecutionStatus::Unknown);
+    assert_eq!(versioned.events, grpc.events);
+    assert_eq!(versioned.keys, grpc.keys);
+    for (a, b) in versioned.view().instructions().zip(grpc.view().instructions()) {
+        assert_eq!(a.data, b.data);
+        assert_eq!(a.account_indices, b.account_indices);
+    }
+}
+
+#[test]
+fn warm_borrowed_parser_allocates_nothing_for_modeled_events_or_unmatched_cpi() {
+    let mut input = fixture();
+    input.meta.as_mut().unwrap().inner_instructions[0].instructions.extend((0..100).map(|_| {
+        InnerInstruction {
+            program_id_index: 1,
+            accounts: vec![0],
+            data: vec![0; 64],
+            stack_height: Some(2),
+        }
+    }));
+    let input = frame(input);
+    let mut parser = TxParser::default();
+    let plan = plan(ParseOptions::default());
+    parser.visit(&input, &plan, |_| {}).unwrap();
+    let (result, allocations) =
+        measure(|| parser.visit(&input, &plan, |batch| assert_eq!(batch.events.len(), 5)));
+    result.unwrap();
+    assert_eq!(allocations.calls, 0, "{allocations:?}");
+}
+
+#[test]
+fn owned_batches_allocate_once_after_learning_output_size() {
+    let mut parser = TxParser::default();
+    let plan = plan(ParseOptions::default());
+    let held = parser.parse_owned(frame(fixture()), &plan).unwrap().unwrap();
+    let input = frame(fixture());
+    let (output, allocations) = measure(|| parser.parse_owned(input, &plan).unwrap().unwrap());
+    assert_eq!(output.events, held.events);
+    assert_ne!(output.events.as_ptr(), held.events.as_ptr());
+    assert_eq!(allocations.calls, 1);
+    assert_eq!(allocations.bytes, output.events.len() * size_of::<TxEvent>());
+}
+
+#[test]
+fn excluded_events_are_skipped_before_allocating() {
+    let input = frame(fixture());
+    let plan = ParsePlan::new(&[Protocol::Whirlpool], Some(&[]), ParseOptions::default());
+    let mut parser = TxParser::default();
+    let (result, allocations) =
+        measure(|| parser.visit(&input, &plan, |_| panic!("filtered batch")));
+    result.unwrap();
+    assert_eq!(allocations.calls, 0);
+}
+
+#[test]
+fn invalid_keys_and_instruction_indices_are_errors() {
+    let mut input = fixture();
+    input.meta.as_mut().unwrap().loaded_writable_addresses[0].pop();
+    assert!(TxFrame::try_from(TransactionPretty {
+        grpc_tx: input,
+        ..TransactionPretty::default()
+    })
+    .is_err());
+    for program in [false, true] {
+        let mut input = fixture();
+        let ix = &mut input.transaction.as_mut().unwrap().message.as_mut().unwrap().instructions[1];
+        if program {
+            ix.program_id_index = 255;
+        } else {
+            ix.accounts[0] = 255;
+        }
+        assert!(TxFrame::try_from(TransactionPretty {
+            grpc_tx: input,
+            ..TransactionPretty::default()
+        })
+        .is_err());
+    }
+    let mut input = fixture();
+    let group = input.meta.as_ref().unwrap().inner_instructions[0].clone();
+    input.meta.as_mut().unwrap().inner_instructions.push(group);
+    assert!(TxFrame::try_from(TransactionPretty {
+        grpc_tx: input,
+        ..TransactionPretty::default()
+    })
+    .is_err());
+}
+
+#[test]
+fn account_table_has_one_allocation_for_static_and_loaded_keys() {
+    let input = SubscribeUpdateTransactionInfo {
+        signature: signature().as_ref().to_vec(),
+        transaction: Some(Transaction {
+            message: Some(Message { account_keys: vec![vec![1; 32]; 32], ..Message::default() }),
+            ..Transaction::default()
+        }),
+        meta: Some(TransactionStatusMeta {
+            loaded_writable_addresses: vec![vec![2; 32]; 8],
+            loaded_readonly_addresses: vec![vec![3; 32]; 8],
+            ..TransactionStatusMeta::default()
+        }),
+        ..SubscribeUpdateTransactionInfo::default()
+    };
+    let (_, allocations) = measure(|| frame(input));
+    assert_eq!(allocations.calls, 1, "{allocations:?}");
+    assert_eq!(allocations.bytes, 48 * size_of::<Pubkey>());
+}
+
+#[test]
+fn wrappers_move_payloads_without_allocations() {
+    // Initialize the shared clock outside the allocation scope.
+    solana_streamer_sdk::streaming::event_parser::common::high_performance_clock::get_high_perf_clock();
+    let update = SubscribeUpdateAccount {
+        slot: 12,
+        is_startup: true,
+        account: Some(SubscribeUpdateAccountInfo {
+            pubkey: vec![1; 32],
+            owner: vec![2; 32],
+            data: vec![9; 1024].into(),
+            txn_signature: Some(signature().as_ref().to_vec()),
+            write_version: 34,
+            executable: true,
+            lamports: 56,
+            rent_epoch: 78,
         }),
     };
-    let inner: Vec<_> = meta
-        .inner_instructions
-        .iter()
-        .map(|group| solana_transaction_status::InnerInstructions {
-            index: group.index as u8,
-            instructions: group
-                .instructions
-                .iter()
-                .map(|ix| solana_transaction_status::InnerInstruction {
-                    instruction: SdkInstruction {
-                        program_id_index: ix.program_id_index as u8,
-                        accounts: ix.accounts.clone(),
-                        data: ix.data.clone(),
-                    },
-                    stack_height: ix.stack_height,
-                })
-                .collect(),
-        })
-        .collect();
-    let mut batch = parse_ready(EventParser::parse_versioned_transaction_to_events(
-        &[Protocol::Whirlpool],
-        None,
-        &transaction,
-        signature(),
-        Some(123),
-        BLOCK_TIME,
-        0,
-        &accounts,
-        &inner,
-        None,
-        Some(9),
-        Some(2),
-        Some(3),
-        None,
-    ))
-    .unwrap()
-    .unwrap();
-    let sink = Arc::new(Mutex::new(Vec::new()));
-    let callback_sink = Arc::clone(&sink);
-    parse_ready(EventParser::parse_instruction_events_from_versioned_transaction(
-        &[Protocol::Whirlpool],
-        None,
-        &transaction,
-        signature(),
-        Some(123),
-        BLOCK_TIME,
-        0,
-        &accounts,
-        &inner,
-        None,
-        Some(9),
-        None,
-        Arc::new(move |event| callback_sink.lock().unwrap().push(event)),
-    ))
-    .unwrap();
-    let mut single = Arc::try_unwrap(sink).unwrap().into_inner().unwrap();
-    let mut grpc = grpc_events(source);
-    normalize_times(&mut grpc);
-    normalize_times(&mut single);
-    normalize_times(&mut batch.events);
-    assert_eq!(grpc, single);
-    assert_eq!(single, batch.events);
-    assert!(batch.has_jito_tip);
-    assert_eq!(batch.entry_index, Some(2));
-    assert_eq!(batch.tx_index_in_entry, Some(3));
-    assert_eq!(batch.execution_status, TxExecutionStatus::Unknown);
-    assert_eq!(accounts.len(), 7);
-
-    // Legacy behavior pads unresolved outer account indices with default keys.
-    // The caller's borrowed static account table must remain intact.
-    let static_keys = &accounts[..4];
-    let padded = parse_ready(EventParser::parse_versioned_transaction_to_events(
-        &[Protocol::Whirlpool],
-        None,
-        &transaction,
-        signature(),
-        None,
-        None,
-        0,
-        static_keys,
-        &[],
-        None,
-        None,
-        None,
-        None,
-        None,
-    ))
-    .unwrap()
-    .unwrap();
-    let DexEvent::WhirlpoolInstructionEvent(event) = &padded.events[1] else {
-        panic!("wrong event")
+    let pointer = update.account.as_ref().unwrap().data.as_ptr();
+    let (account, allocations) = measure(|| AccountFrame::try_from(update).unwrap());
+    assert_eq!(allocations.calls, 0);
+    assert_eq!(account.data.as_ptr(), pointer);
+    assert_eq!((account.slot, account.write_version, account.lamports), (12, 34, 56));
+    let block = SubscribeUpdateBlockMeta {
+        slot: 12,
+        blockhash: "blockhash".into(),
+        ..SubscribeUpdateBlockMeta::default()
     };
-    assert_eq!(event.accounts[..2], [Pubkey::default(); 2]);
-    assert_eq!(static_keys, &accounts[..4]);
+    let pointer = block.blockhash.as_ptr();
+    let (block, allocations) = measure(|| BlockMetaPretty::from((block, BLOCK_TIME)));
+    assert_eq!(allocations.calls, 0);
+    assert_eq!(block.block_hash.as_ptr(), pointer);
+    let update = SubscribeUpdateTransaction { transaction: Some(fixture()), slot: 123 };
+    let pointer = update.transaction.as_ref().unwrap().signature.as_ptr();
+    let (tx, allocations) = measure(|| TransactionPretty::try_from((update, BLOCK_TIME)).unwrap());
+    assert_eq!(allocations.calls, 0);
+    assert_eq!(tx.grpc_tx.signature.as_ptr(), pointer);
 }
 
 #[test]
-fn borrowed_cpi_retains_compute_unit_log_attribution() {
+fn nested_cu_belongs_to_the_exact_invocation() {
     let mut transaction = fixture();
     let logs = &mut transaction.meta.as_mut().unwrap().log_messages;
     *logs = vec![
@@ -437,270 +348,391 @@ fn borrowed_cpi_retains_compute_unit_log_attribution() {
             matcher: SwapCuInstructionMatcher::Discriminator8(vec![&INITIALIZE_POOL]),
         }],
     };
-    let batch = parse_ready(EventParser::parse_grpc_transaction_to_events(
-        &[Protocol::Whirlpool],
-        None,
-        transaction,
-        signature(),
-        None,
-        None,
-        0,
-        None,
-        None,
-        Some(&config),
-        false,
-    ))
-    .unwrap()
-    .unwrap();
+
+    let mut parser = TxParser::default();
+    let batch = parser
+        .parse_owned(
+            frame(transaction),
+            &plan(ParseOptions { swap_cu: config, ..ParseOptions::default() }),
+        )
+        .unwrap()
+        .unwrap();
     assert_eq!(
-        batch.events.iter().map(|event| event.metadata().swap_compute_units).collect::<Vec<_>>(),
+        batch.events.iter().map(|e| e.metadata().swap_compute_units).collect::<Vec<_>>(),
         [None, Some(404), Some(101), Some(202), None]
     );
 }
 
 #[test]
-fn malformed_loaded_key_is_rejected_without_shifting_indices() {
-    let mut transaction = fixture();
-    transaction.meta.as_mut().unwrap().loaded_writable_addresses[0].pop();
-    let error = parse_ready(EventParser::parse_grpc_transaction_to_events(
-        &[Protocol::Whirlpool],
-        None,
-        transaction,
-        signature(),
-        None,
-        None,
-        0,
-        None,
-        None,
-        None,
-        true,
-    ))
-    .unwrap_err();
-    assert!(error.to_string().contains("account key at index 4"));
-}
-
-#[test]
-fn account_table_uses_one_allocation_for_static_and_loaded_keys() {
-    let transaction = SubscribeUpdateTransactionInfo {
-        transaction: Some(Transaction {
-            message: Some(Message { account_keys: vec![vec![1; 32]; 32], ..Default::default() }),
-            ..Default::default()
-        }),
-        meta: Some(TransactionStatusMeta {
-            loaded_writable_addresses: vec![vec![2; 32]; 8],
-            loaded_readonly_addresses: vec![vec![3; 32]; 8],
-            ..Default::default()
-        }),
-        ..Default::default()
+fn account_filter_precedes_snapshot_decode_and_snapshots_share_bytes() {
+    use solana_streamer_sdk::streaming::event_parser::protocols::pumpfun::{
+        discriminators, parser::PUMPFUN_PROGRAM_ID, types::BONDING_CURVE_SIZE,
     };
-    let (result, allocations) = measure(|| {
-        parse_ready(EventParser::parse_grpc_transaction_to_events(
-            &[],
-            None,
-            transaction,
-            signature(),
-            None,
-            None,
-            0,
-            None,
-            None,
-            None,
-            true,
-        ))
-    });
-    assert!(result.unwrap().is_none());
-    assert_eq!(allocations.calls, 1, "{allocations:?}");
-    assert_eq!(allocations.bytes, 48 * size_of::<Pubkey>());
+    let mut bytes = vec![0; 8 + BONDING_CURVE_SIZE];
+    bytes[..8].copy_from_slice(discriminators::BONDING_CURVE_ACCOUNT);
+    bytes[8..16].copy_from_slice(&123u64.to_le_bytes());
+    let account = AccountFrame {
+        data: bytes.into(),
+        owner: PUMPFUN_PROGRAM_ID,
+        slot: 999,
+        write_version: 123,
+        ..AccountFrame::default()
+    };
+    let excluded = ParsePlan::new(
+        &[Protocol::PumpFun],
+        Some(&[EventType::AccountPumpFunGlobal]),
+        ParseOptions::default(),
+    );
+    let (_, allocations) = measure(|| assert!(account.view(&excluded).is_none()));
+    assert_eq!(allocations.calls, 0);
+    let plan = ParsePlan::all(&[Protocol::PumpFun]);
+    let view = account.view(&plan).unwrap();
+    assert_eq!(view.u64_at(8), Some(123));
+    assert_eq!(view.u64_at(usize::MAX), None);
+    assert_eq!(view.u128_at(usize::MAX), None);
+    assert_eq!(view.pubkey_at(usize::MAX), None);
+    let AccountEvent::PumpFunBondingCurveAccountEvent(snapshot) = view.decode().unwrap() else {
+        panic!("wrong snapshot")
+    };
+    assert_eq!(snapshot.raw_account_data.as_ptr(), account.data.as_ptr());
+    assert_eq!(snapshot.bonding_curve.virtual_token_reserves, 123);
+    drop(account);
+    assert_eq!(snapshot.raw_account_data[8..16], 123u64.to_le_bytes());
+}
+
+fn positioned_log(marker: u8) -> String {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    let data = [
+        &[237, 175, 243, 230, 147, 117, 101, 121][..],
+        &[marker; 32],
+        &[marker + 1; 32],
+        &1i32.to_le_bytes(),
+        &2i32.to_le_bytes(),
+    ]
+    .concat();
+    format!("Program data: {}", STANDARD.encode(data))
+}
+fn logged_fixture() -> SubscribeUpdateTransactionInfo {
+    let mut tx = fixture();
+    tx.meta.as_mut().unwrap().log_messages = vec![
+        format!("Program {WHIRLPOOL_PROGRAM_ID} invoke [1]"),
+        positioned_log(1),
+        format!("Program {WHIRLPOOL_PROGRAM_ID} invoke [2]"),
+        positioned_log(2),
+        format!("Program {WHIRLPOOL_PROGRAM_ID} consumed 101 of 200000 compute units"),
+        format!("Program {WHIRLPOOL_PROGRAM_ID} success"),
+        format!("Program {} invoke [2]", Pubkey::default()),
+        format!("Program {} success", Pubkey::default()),
+        format!("Program {WHIRLPOOL_PROGRAM_ID} invoke [2]"),
+        positioned_log(3),
+        format!("Program {WHIRLPOOL_PROGRAM_ID} consumed 202 of 200000 compute units"),
+        format!("Program {WHIRLPOOL_PROGRAM_ID} success"),
+        positioned_log(4),
+        format!("Program {WHIRLPOOL_PROGRAM_ID} consumed 404 of 200000 compute units"),
+        format!("Program {WHIRLPOOL_PROGRAM_ID} success"),
+    ];
+    tx
+}
+fn log_plan() -> ParsePlan {
+    plan(ParseOptions {
+        enrich_logs: true,
+        swap_cu: SwapCuParseConfig {
+            enabled: true,
+            targets: vec![SwapCuTarget {
+                protocol: Protocol::Whirlpool,
+                program_id: WHIRLPOOL_PROGRAM_ID,
+                matcher: SwapCuInstructionMatcher::Discriminator8(vec![&INITIALIZE_POOL]),
+            }],
+        },
+        ..ParseOptions::default()
+    })
+}
+fn execution_markers(event: &TxEvent) -> Vec<u8> {
+    use solana_streamer_sdk::streaming::event_parser::protocols::whirlpool::WhirlpoolExecutionEvent;
+    let TxEvent::WhirlpoolInstructionEvent(event) = event else { return vec![] };
+    event
+        .execution_events
+        .iter()
+        .map(|event| match event {
+            WhirlpoolExecutionEvent::PositionOpened { whirlpool, .. } => whirlpool.to_bytes()[0],
+            _ => panic!("wrong execution event"),
+        })
+        .collect()
+}
+#[test]
+fn one_log_index_handles_reentry_all_data_items_and_omitted_builtin_logs() {
+    let batch =
+        TxParser::default().parse_owned(frame(logged_fixture()), &log_plan()).unwrap().unwrap();
+    assert_eq!(execution_markers(&batch.events[1]), [1, 4]);
+    assert_eq!(execution_markers(&batch.events[2]), [2]);
+    assert_eq!(execution_markers(&batch.events[3]), [3]);
+    assert_eq!(
+        batch.events.iter().map(|e| e.metadata().swap_compute_units).collect::<Vec<_>>(),
+        [None, Some(404), Some(101), Some(202), None]
+    );
+}
+#[test]
+fn truncated_or_misaligned_logs_never_supply_sibling_observations() {
+    let mut tx = logged_fixture();
+    tx.meta.as_mut().unwrap().log_messages.truncate(13);
+    tx.meta.as_mut().unwrap().log_messages.push("Log truncated".into());
+    let batch = TxParser::default().parse_owned(frame(tx), &log_plan()).unwrap().unwrap();
+    assert!(execution_markers(&batch.events[1]).is_empty());
+    assert_eq!(batch.events[1].metadata().swap_compute_units, None);
+    assert_eq!(execution_markers(&batch.events[2]), [2]); // completed child is still evidence
+    let mut tx = logged_fixture();
+    tx.meta.as_mut().unwrap().log_messages.remove(5); // missing child exit before sibling invoke
+    let batch = TxParser::default().parse_owned(frame(tx), &log_plan()).unwrap().unwrap();
+    assert!(batch.events.iter().all(|e| execution_markers(e).is_empty()));
+    assert!(batch.events.iter().all(|e| e.metadata().swap_compute_units.is_none()));
+}
+#[test]
+fn disabled_log_work_ignores_bad_base64_and_keeps_source_optional() {
+    let batch = TxParser::default()
+        .parse_owned(frame(logged_fixture()), &plan(ParseOptions::default()))
+        .unwrap()
+        .unwrap();
+    assert!(batch.events.iter().all(|e| execution_markers(e).is_empty()));
+    assert!(batch.events.iter().all(|e| e.metadata().swap_compute_units.is_none()));
+    assert!(batch.logs.is_none());
+}
+#[test]
+fn filtered_create_dependencies_are_transaction_local_and_ordered() {
+    use solana_streamer_sdk::streaming::event_parser::{
+        protocols::pumpfun::{discriminators, parser::PUMPFUN_PROGRAM_ID},
+        TxMetadata,
+    };
+    let mut keys: Vec<_> = (1..=16).map(|i| Pubkey::new_from_array([i; 32])).collect();
+    keys.push(PUMPFUN_PROGRAM_ID);
+    let create = CompiledInstruction {
+        program_id_index: 16,
+        accounts: (0..16).collect(),
+        data: [discriminators::CREATE_TOKEN_IX, &[0; 512]].concat(),
+    };
+    let mut buy = CompiledInstruction {
+        program_id_index: 16,
+        accounts: (0..16).collect(),
+        data: [discriminators::BUY_IX, &[0; 16]].concat(),
+    };
+    buy.accounts[6] = create.accounts[7];
+    let plan = ParsePlan::new(
+        &[Protocol::PumpFun],
+        Some(&[EventType::PumpFunBuy]),
+        ParseOptions::default(),
+    );
+    let mut parser = TxParser::default();
+    for (instructions, expect_dev) in [
+        (vec![create.clone(), buy.clone()], true),
+        (vec![buy.clone()], false),
+        (vec![buy, create], false),
+    ] {
+        let input = TxFrame::new(TxMetadata::default(), keys.clone(), instructions, vec![], vec![])
+            .unwrap();
+        let batch = parser.parse_owned(input, &plan).unwrap().unwrap();
+        assert_eq!(batch.events.len(), 1);
+        let TxEvent::PumpFunTradeEvent(event) = &batch.events[0] else { panic!("wrong event") };
+        assert_eq!(event.is_dev_create_token_trade, expect_dev);
+    }
+}
+#[test]
+fn compute_summary_is_available_without_compute_events() {
+    let plan = ParsePlan::new(
+        &[Protocol::Whirlpool],
+        Some(&[EventType::WhirlpoolInstruction]),
+        ParseOptions { compute_budget: true, ..ParseOptions::default() },
+    );
+    let batch = TxParser::default().parse_owned(frame(fixture()), &plan).unwrap().unwrap();
+    assert_eq!(batch.events.len(), 3);
+    assert_eq!(batch.summary.compute_unit_limit, Some(200_000));
+    assert_eq!(batch.summary.compute_unit_price, Some(42));
 }
 
 #[test]
-fn cpi_buffer_count_does_not_add_allocations() {
-    for count in [1, 20] {
-        let mut transaction = fixture();
-        transaction.transaction.as_mut().unwrap().message.as_mut().unwrap().instructions =
-            vec![CompiledInstruction { program_id_index: 1, ..Default::default() }];
-        let meta = transaction.meta.as_mut().unwrap();
-        meta.inner_instructions = vec![InnerInstructions {
-            index: 0,
-            instructions: vec![
-                InnerInstruction {
-                    program_id_index: 1,
-                    accounts: vec![0, 6],
-                    data: vec![0; 64],
-                    stack_height: Some(2),
-                };
-                count
-            ],
-        }];
-        let callback: Arc<dyn Fn(DexEvent) + Send + Sync> =
-            Arc::new(|_| panic!("no DEX instruction"));
-        let (result, allocations) = measure(|| {
-            parse_ready(EventParser::parse_grpc_transaction(
-                &[],
-                None,
-                transaction,
-                signature(),
-                None,
-                None,
-                0,
-                None,
-                None,
-                None,
-                callback,
-            ))
-        });
-        result.unwrap();
-        // One account table and one inner-event buffer, independent of CPI count.
-        assert_eq!(allocations.calls, 2, "{count} CPI instructions: {allocations:?}");
+fn cpi_merging_checks_program_and_stops_at_sibling_calls() {
+    use solana_streamer_sdk::streaming::event_parser::{
+        protocols::pumpfun::{discriminators, parser::PUMPFUN_PROGRAM_ID},
+        TxMetadata,
+    };
+    let mut keys: Vec<_> = (1..=16).map(|i| Pubkey::new_from_array([i; 32])).collect();
+    keys.push(Pubkey::default());
+    keys.push(PUMPFUN_PROGRAM_ID);
+    let buy = || InnerInstruction {
+        program_id_index: 17,
+        accounts: (0..16).collect(),
+        data: [discriminators::BUY_IX, &[0; 16]].concat(),
+        stack_height: Some(2),
+    };
+    let cpi = |amount: u64, program_id_index| {
+        let mut data = vec![0; 250];
+        data[32..40].copy_from_slice(&amount.to_le_bytes());
+        data[40..48].copy_from_slice(&456u64.to_le_bytes());
+        data[48] = 1;
+        InnerInstruction {
+            program_id_index,
+            accounts: vec![],
+            data: [discriminators::TRADE_EVENT, data.as_slice()].concat(),
+            stack_height: Some(3),
+        }
+    };
+    let plan = ParsePlan::new(
+        &[Protocol::PumpFun],
+        Some(&[EventType::PumpFunBuy]),
+        ParseOptions::default(),
+    );
+    for has_first in [true, false] {
+        let mut inner = vec![buy(), cpi(999, 16)]; // matching bytes from a different program must be ignored
+        if has_first {
+            inner.push(cpi(111, 17));
+        }
+        inner.extend([buy(), cpi(222, 17)]);
+        let input = TxFrame::new(
+            TxMetadata::default(),
+            keys.clone(),
+            vec![CompiledInstruction { program_id_index: 16, ..CompiledInstruction::default() }],
+            vec![InnerInstructions { index: 0, instructions: inner }],
+            vec![],
+        )
+        .unwrap();
+        let batch = TxParser::default().parse_owned(input, &plan).unwrap().unwrap();
+        let amounts: Vec<_> = batch
+            .events
+            .iter()
+            .map(|e| match e {
+                TxEvent::PumpFunTradeEvent(e) => e.sol_amount,
+                _ => panic!("wrong event"),
+            })
+            .collect();
+        assert_eq!(amounts, [if has_first { 111 } else { 0 }, 222]);
     }
 }
 
 #[test]
-fn wrappers_move_payloads_without_allocating_even_through_compatibility_factories() {
-    let account = SubscribeUpdateAccount {
-        slot: 12,
-        is_startup: true,
-        account: Some(SubscribeUpdateAccountInfo {
-            pubkey: vec![1; 32],
-            owner: vec![2; 32],
-            data: vec![9; 1024],
-            txn_signature: Some(signature().as_ref().to_vec()),
-            write_version: 34,
-            executable: true,
-            lamports: 56,
-            rent_epoch: 78,
-        }),
-    };
-    let pointer = account.account.as_ref().unwrap().data.as_ptr();
-    let (account, allocations) = measure(|| factory::create_account_pretty_pooled(account));
-    assert_eq!(allocations.calls, 0, "{allocations:?}");
-    assert_eq!(account.data.as_ptr(), pointer);
-    assert_eq!(
-        (account.slot, account.write_version, account.lamports, account.rent_epoch),
-        (12, 34, 56, 78)
+fn failed_execution_and_bad_balances_are_preserved_for_audit() {
+    let mut info = fixture();
+    let meta = info.meta.as_mut().unwrap();
+    meta.err = Some(TransactionError { err: vec![1] });
+    meta.pre_token_balances[0].ui_token_amount.as_mut().unwrap().amount = "bad amount".into();
+    let batch = TxParser::default()
+        .parse_owned(
+            frame(info),
+            &plan(ParseOptions { balance_audit: true, ..ParseOptions::default() }),
+        )
+        .unwrap()
+        .unwrap();
+    assert_eq!(batch.meta.execution_status, TxExecutionStatus::Failed);
+    let audit = batch.audit.unwrap();
+    assert_eq!(audit.parse_errors.len(), 1);
+    assert_eq!(audit.token_balance_changes[0].pre_amount, None);
+    assert_eq!(audit.token_balance_changes[0].post_amount, Some(20));
+}
+
+#[test]
+fn fully_filtered_transactions_do_not_build_even_enabled_log_indexes() {
+    let input = frame(logged_fixture());
+    let plan = ParsePlan::new(
+        &[Protocol::Whirlpool],
+        Some(&[]),
+        ParseOptions {
+            enrich_logs: true,
+            swap_cu: SwapCuParseConfig::default_enabled(),
+            ..ParseOptions::default()
+        },
     );
-    assert!(account.is_startup && account.executable);
-    assert_eq!(account.signature, signature());
-    assert_eq!(account.pubkey, Pubkey::new_from_array([1; 32]));
-    assert_eq!(account.owner, Pubkey::new_from_array([2; 32]));
-    let block = SubscribeUpdateBlockMeta {
-        slot: 12,
-        blockhash: "blockhash".to_owned(),
-        ..Default::default()
-    };
-    let pointer = block.blockhash.as_ptr();
-    let (block, allocations) =
-        measure(|| factory::create_block_meta_pretty_pooled(block, BLOCK_TIME));
-    assert_eq!(allocations.calls, 0, "{allocations:?}");
-    assert_eq!(block.block_hash.as_ptr(), pointer);
-    assert_eq!(block.block_time, BLOCK_TIME);
-    let transaction = SubscribeUpdateTransaction { transaction: Some(fixture()), slot: 123 };
-    let pointer = transaction.transaction.as_ref().unwrap().signature.as_ptr();
-    let (transaction, allocations) =
-        measure(|| factory::create_transaction_pretty_pooled(transaction, BLOCK_TIME));
-    assert_eq!(allocations.calls, 0, "{allocations:?}");
-    assert_eq!(transaction.grpc_tx.signature.as_ptr(), pointer);
-    assert_eq!(transaction.signature, signature());
-    assert_eq!(transaction.transaction_index, Some(9));
-    assert_eq!(transaction.block_time, BLOCK_TIME);
-}
-
-#[test]
-fn returning_legacy_pool_objects_reuses_the_original_box_without_allocation() {
-    let accounts = AccountPrettyPool::new(1, 1);
-    let blocks = BlockMetaPrettyPool::new(1, 1);
-    let transactions = TransactionPrettyPool::new(1, 1);
-    let mut account = accounts.acquire();
-    account.data = vec![1; 8];
-    account.signature = signature();
-    let account_pointer = &*account as *const AccountPretty;
-    let block = blocks.acquire();
-    let block_pointer = &*block as *const BlockMetaPretty;
-    let transaction = transactions.acquire();
-    let transaction_pointer = &*transaction as *const TransactionPretty;
-    let (_, allocations) = measure(|| {
-        drop(account);
-        drop(block);
-        drop(transaction);
-    });
-    assert_eq!(allocations.calls, 0, "{allocations:?}");
-    let account = accounts.acquire();
-    assert_eq!(&*account as *const _, account_pointer);
-    assert!(account.data.is_empty());
-    assert_eq!(account.signature, Signature::default());
-    assert_eq!(&*blocks.acquire() as *const _, block_pointer);
-    assert_eq!(&*transactions.acquire() as *const _, transaction_pointer);
-}
-
-#[test]
-fn owned_event_callbacks_and_batches_do_not_clone_event_buffers() {
-    let accounts = [
-        Pubkey::new_from_array([1; 32]),
-        Pubkey::new_from_array([2; 32]),
-        Pubkey::new_from_array([3; 32]),
-        WHIRLPOOL_PROGRAM_ID,
-    ];
-    let ix = instruction(vec![0, 1, 2], 11);
-    let transaction = VersionedTransaction {
-        signatures: vec![signature()],
-        message: VersionedMessage::V0(v0::Message {
-            account_keys: accounts.to_vec(),
-            instructions: vec![SdkInstruction {
-                program_id_index: 3,
-                accounts: ix.accounts,
-                data: ix.data,
-            }],
-            ..Default::default()
-        }),
-    };
-    let sink = Arc::new(Mutex::new(None));
-    let callback_sink = Arc::clone(&sink);
-    let callback: Arc<dyn Fn(DexEvent) + Send + Sync> =
-        Arc::new(move |event| *callback_sink.lock().unwrap() = Some(event));
-    let (result, single_allocations) = measure(|| {
-        parse_ready(EventParser::parse_instruction_events_from_versioned_transaction(
-            &[Protocol::Whirlpool],
-            None,
-            &transaction,
-            signature(),
-            None,
-            None,
-            0,
-            &accounts,
-            &[],
-            None,
-            None,
-            None,
-            callback,
-        ))
-    });
+    let mut parser = TxParser::default();
+    let (result, allocations) =
+        measure(|| parser.visit(&input, &plan, |_| panic!("filtered output")));
     result.unwrap();
-    // Resolved instruction accounts and the two owned event buffers are necessary.
-    // Borrowing the caller's account table and moving the event add no allocations.
-    assert!(single_allocations.calls <= 3, "{single_allocations:?}");
-    let mut single = Arc::try_unwrap(sink).unwrap().into_inner().unwrap().unwrap();
-    let (batch, batch_allocations) = measure(|| {
-        parse_ready(EventParser::parse_versioned_transaction_to_events(
-            &[Protocol::Whirlpool],
-            None,
-            &transaction,
-            signature(),
-            None,
-            None,
-            0,
-            &accounts,
-            &[],
-            None,
-            None,
-            None,
-            None,
-            None,
-        ))
-    });
-    let mut batch = batch.unwrap().unwrap();
-    // Batch adds a result Vec plus the raw instruction and its three owned buffers.
-    assert!(batch_allocations.calls <= 8, "{batch_allocations:?}");
-    single.metadata_mut().handle_us = 0;
-    normalize_times(&mut batch.events);
-    assert_eq!(batch.events, [single]);
+    assert_eq!(allocations.calls, 0);
+}
+
+#[test]
+fn summary_only_batches_and_serialized_sources_remain_usable() {
+    let plan = ParsePlan::new(
+        &[],
+        Some(&[]),
+        ParseOptions {
+            compute_budget: true,
+            detect_jito: true,
+            retain_instructions: true,
+            ..ParseOptions::default()
+        },
+    );
+    let batch = TxParser::default().parse_owned(frame(fixture()), &plan).unwrap().unwrap();
+    assert!(batch.events.is_empty());
+    assert_eq!(batch.summary.compute_unit_price, Some(42));
+    assert_eq!(batch.summary.is_jito, Some(true));
+    let restored: solana_streamer_sdk::streaming::event_parser::TxBatch =
+        serde_json::from_value(serde_json::to_value(&batch).unwrap()).unwrap();
+    assert_eq!(batch, restored);
+    assert_eq!(restored.instruction(1).unwrap().account_indices, [5, 4, 0]);
+    let summary = ParsePlan::new(
+        &[],
+        Some(&[]),
+        ParseOptions { compute_budget: true, ..ParseOptions::default() },
+    );
+    assert!(TxParser::default()
+        .parse_owned(frame(fixture()), &summary)
+        .unwrap()
+        .unwrap()
+        .events
+        .is_empty());
+}
+
+#[test]
+fn parent_swap_does_not_merge_a_reentrant_child_swaps_result() {
+    use solana_streamer_sdk::streaming::event_parser::{
+        protocols::pumpfun::{discriminators, parser::PUMPFUN_PROGRAM_ID},
+        TxMetadata,
+    };
+    let mut keys: Vec<_> = (1..=16).map(|i| Pubkey::new_from_array([i; 32])).collect();
+    keys.push(PUMPFUN_PROGRAM_ID);
+    let buy = [discriminators::BUY_IX, &[0; 16]].concat();
+    let event = |amount: u64, height| {
+        let mut body = vec![0; 250];
+        body[32..40].copy_from_slice(&amount.to_le_bytes());
+        body[48] = 1;
+        InnerInstruction {
+            program_id_index: 16,
+            accounts: vec![],
+            data: [discriminators::TRADE_EVENT, body.as_slice()].concat(),
+            stack_height: Some(height),
+        }
+    };
+    let input = TxFrame::new(
+        TxMetadata::default(),
+        keys,
+        vec![CompiledInstruction {
+            program_id_index: 16,
+            accounts: (0..16).collect(),
+            data: buy.clone(),
+        }],
+        vec![InnerInstructions {
+            index: 0,
+            instructions: vec![
+                InnerInstruction {
+                    program_id_index: 16,
+                    accounts: (0..16).collect(),
+                    data: buy,
+                    stack_height: Some(2),
+                },
+                event(222, 3),
+                event(111, 2),
+            ],
+        }],
+        vec![],
+    )
+    .unwrap();
+    let batch = TxParser::default()
+        .parse_owned(input, &ParsePlan::all(&[Protocol::PumpFun]))
+        .unwrap()
+        .unwrap();
+    let amounts: Vec<_> = batch
+        .events
+        .iter()
+        .map(|e| match e {
+            TxEvent::PumpFunTradeEvent(e) => e.sol_amount,
+            _ => panic!("wrong event"),
+        })
+        .collect();
+    assert_eq!(amounts, [111, 222]);
 }

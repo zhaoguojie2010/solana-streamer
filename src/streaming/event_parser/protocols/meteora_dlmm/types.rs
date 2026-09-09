@@ -10,9 +10,9 @@ use crate::streaming::{
             MeteoraDlmmBinArrayAccountEvent, MeteoraDlmmBinArrayBitmapExtensionAccountEvent,
             MeteoraDlmmLbPairAccountEvent,
         },
-        DexEvent,
+        AccountEvent,
     },
-    grpc::AccountPretty,
+    grpc::AccountFrame,
 };
 
 #[repr(C)]
@@ -182,14 +182,14 @@ pub fn lb_pair_decode(data: &[u8]) -> Option<LbPair> {
     borsh::from_slice::<LbPair>(&data[..LB_PAIR_SIZE]).ok()
 }
 
-pub fn lb_pair_parser(account: AccountPretty, mut metadata: EventMetadata) -> Option<DexEvent> {
+pub fn lb_pair_parser(account: AccountFrame, mut metadata: EventMetadata) -> Option<AccountEvent> {
     metadata.event_type = EventType::AccountMeteoraDlmmLbPair;
 
     if account.data.len() < LB_PAIR_SIZE + 8 {
         return None;
     }
     if let Some(lb_pair) = lb_pair_decode(&account.data[8..LB_PAIR_SIZE + 8]) {
-        Some(DexEvent::MeteoraDlmmLbPairAccountEvent(MeteoraDlmmLbPairAccountEvent {
+        Some(AccountEvent::MeteoraDlmmLbPairAccountEvent(MeteoraDlmmLbPairAccountEvent {
             metadata,
             pubkey: account.pubkey,
             executable: account.executable,
@@ -212,9 +212,9 @@ pub fn bin_array_bitmap_extension_decode(data: &[u8]) -> Option<BinArrayBitmapEx
 }
 
 pub fn bin_array_bitmap_extension_parser(
-    account: AccountPretty,
+    account: AccountFrame,
     mut metadata: EventMetadata,
-) -> Option<DexEvent> {
+) -> Option<AccountEvent> {
     metadata.event_type = EventType::AccountMeteoraDlmmBinArrayBitmapExtension;
 
     if account.data.len() < BIN_ARRAY_BITMAP_EXTENSION_SIZE + 8 {
@@ -223,7 +223,7 @@ pub fn bin_array_bitmap_extension_parser(
     if let Some(bin_array_bitmap_extension) =
         bin_array_bitmap_extension_decode(&account.data[8..BIN_ARRAY_BITMAP_EXTENSION_SIZE + 8])
     {
-        Some(DexEvent::MeteoraDlmmBinArrayBitmapExtensionAccountEvent(
+        Some(AccountEvent::MeteoraDlmmBinArrayBitmapExtensionAccountEvent(
             MeteoraDlmmBinArrayBitmapExtensionAccountEvent {
                 metadata,
                 pubkey: account.pubkey,
@@ -312,7 +312,10 @@ pub fn bin_array_decode(data: &[u8]) -> Option<BinArray> {
     Some(BinArray { index, version, _padding, lb_pair, bins })
 }
 
-pub fn bin_array_parser(account: AccountPretty, mut metadata: EventMetadata) -> Option<DexEvent> {
+pub fn bin_array_parser(
+    account: AccountFrame,
+    mut metadata: EventMetadata,
+) -> Option<AccountEvent> {
     metadata.event_type = EventType::AccountMeteoraDlmmBinArray;
 
     // 跳过前 8 字节的 discriminator
@@ -320,7 +323,7 @@ pub fn bin_array_parser(account: AccountPretty, mut metadata: EventMetadata) -> 
         return None;
     }
     if let Some(bin_array) = bin_array_decode(&account.data[8..BIN_ARRAY_SIZE + 8]) {
-        Some(DexEvent::MeteoraDlmmBinArrayAccountEvent(MeteoraDlmmBinArrayAccountEvent {
+        Some(AccountEvent::MeteoraDlmmBinArrayAccountEvent(MeteoraDlmmBinArrayAccountEvent {
             metadata,
             pubkey: account.pubkey,
             executable: account.executable,

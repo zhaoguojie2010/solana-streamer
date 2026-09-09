@@ -1,45 +1,14 @@
 mod common;
-
 use solana_streamer_sdk::streaming::{
-    event_parser::{
-        protocols::{
-            bonk::parser::BONK_PROGRAM_ID, meteora_damm_v2::parser::METEORA_DAMM_V2_PROGRAM_ID,
-            pumpfun::parser::PUMPFUN_PROGRAM_ID, pumpswap::parser::PUMPSWAP_PROGRAM_ID,
-            raydium_amm_v4::parser::RAYDIUM_AMM_V4_PROGRAM_ID,
-            raydium_clmm::parser::RAYDIUM_CLMM_PROGRAM_ID,
-            raydium_cpmm::parser::RAYDIUM_CPMM_PROGRAM_ID,
-        },
-        DexEvent, Protocol,
-    },
-    grpc::ClientConfig,
-    yellowstone_grpc::{AccountFilter, TransactionFilter},
+    event_parser::{ParseOptions, ParsePlan, Protocol},
+    yellowstone_grpc::{AccountFilter, StreamEvent, SubscriptionRequest, TransactionFilter},
     YellowstoneGrpc,
 };
-
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> anyhow::Result<()> {
     env_logger::init();
-    println!("Starting Yellowstone gRPC Streamer...");
-    test_grpc().await?;
-    Ok(())
-}
-
-async fn test_grpc() -> Result<(), Box<dyn std::error::Error>> {
-    println!("Subscribing to Yellowstone gRPC events...");
-
-    // Create low-latency configuration
-    let mut config: ClientConfig = ClientConfig::default();
-    // Enable performance monitoring, has performance overhead, disabled by default
-    config.enable_metrics = true;
-    let grpc =
-        YellowstoneGrpc::new_with_config(common::grpc_endpoint()?, common::grpc_token()?, config)?;
-
-    println!("GRPC client created successfully");
-
-    let callback = create_event_callback();
-
-    // Will try to parse corresponding protocol events from transactions
-    let protocols = vec![
+    let client = YellowstoneGrpc::new(common::grpc_endpoint()?, common::grpc_token()?)?;
+    let protocols = [
         Protocol::PumpFun,
         Protocol::PumpSwap,
         Protocol::Bonk,
@@ -47,83 +16,53 @@ async fn test_grpc() -> Result<(), Box<dyn std::error::Error>> {
         Protocol::RaydiumClmm,
         Protocol::RaydiumAmmV4,
         Protocol::MeteoraDammV2,
+        Protocol::MeteoraDlmm,
+        Protocol::Whirlpool,
+        Protocol::PancakeSwap,
     ];
-
-    println!("Protocols to monitor: {:?}", protocols);
-
-    // Filter accounts
-    let account_include = vec![
-        PUMPFUN_PROGRAM_ID.to_string(),         // Listen to pumpfun program ID
-        PUMPSWAP_PROGRAM_ID.to_string(),        // Listen to pumpswap program ID
-        BONK_PROGRAM_ID.to_string(),            // Listen to bonk program ID
-        RAYDIUM_CPMM_PROGRAM_ID.to_string(),    // Listen to raydium_cpmm program ID
-        RAYDIUM_CLMM_PROGRAM_ID.to_string(),    // Listen to raydium_clmm program ID
-        RAYDIUM_AMM_V4_PROGRAM_ID.to_string(),  // Listen to raydium_amm_v4 program ID
-        METEORA_DAMM_V2_PROGRAM_ID.to_string(), // Listen to meteora_damm_v2 program ID
-    ];
-    let account_exclude = vec![];
-    let account_required = vec![];
-
-    // Listen to transaction data
-    let transaction_filter = TransactionFilter {
-        account_include: account_include.clone(),
-        account_exclude,
-        account_required,
-    };
-
-    // Listen to account data belonging to owner programs -> account event monitoring
-    let account_filter = AccountFilter {
-        account: vec![],
-        owner: account_include.clone(),
-        filters: vec![],
-        cuckoo_accounts_filter: None,
-    };
-
-    // Event filtering
-    // No event filtering, includes all events
-    let event_type_filter = None;
-    // Only include PumpSwapBuy events and PumpSwapSell events
-    // let event_type_filter = Some(EventTypeFilter { include: vec![EventType::PumpFunTrade] });
-
-    println!("Starting to listen for events, press Ctrl+C to stop...");
-    println!("Monitoring programs: {:?}", account_include);
-
-    println!("Starting subscription...");
-
-    grpc.subscribe_events_immediate(
-        protocols,
+    let owners: Vec<String> =
+        protocols.iter().flat_map(Protocol::get_program_id).map(|key| key.to_string()).collect();
+    let plan = ParsePlan::new(
+        &protocols,
         None,
-        vec![transaction_filter],
-        vec![account_filter],
-        event_type_filter,
-        None,
-        callback,
-    )
-    .await?;
-
-    println!("Waiting for Ctrl+C to stop...");
-    let shutdown = common::wait_for_shutdown(&grpc.subscription_handle).await;
-    grpc.stop().await;
+        ParseOptions { enrich_logs: true, ..ParseOptions::default() },
+    );
+    let mut request = SubscriptionRequest::new(plan);
+    request.transactions =
+        vec![TransactionFilter { account_include: owners.clone(), ..TransactionFilter::default() }];
+    request.accounts = vec![AccountFilter { owner: owners, ..AccountFilter::default() }];
+    request.blocks_meta = true;
+    client
+        .subscribe(request, |event| match event {
+            StreamEvent::Transaction(batch) => {
+                println!(
+                    "signature={} slot={} events={}",
+                    batch.meta.signature,
+                    batch.meta.slot,
+                    batch.events.len()
+                );
+                for event in batch.events {
+                    println!("{event:?}");
+                }
+            }
+            StreamEvent::Account(account) => {
+                // Read a few checked fields directly, or decode a full snapshot on demand.
+                println!(
+                    "account={} slot={} bytes={}",
+                    account.frame.pubkey,
+                    account.frame.slot,
+                    account.bytes().len()
+                );
+                if let Some(snapshot) = account.decode() {
+                    println!("{snapshot:?}");
+                }
+            }
+            StreamEvent::BlockMeta(block) => println!("{block:?}"),
+            StreamEvent::Slot(slot) => println!("{slot:?}"),
+        })
+        .await?;
+    let shutdown = common::wait_for_shutdown(&client.subscription_handle).await;
+    let stopped = client.stop().await;
     shutdown?;
-
-    Ok(())
-}
-
-fn create_event_callback() -> impl Fn(DexEvent) {
-    |event: DexEvent| {
-        println!(
-            "🎉 Event received! Type: {:?}, transaction_index: {:?}",
-            event.metadata().event_type,
-            event.metadata().transaction_index
-        );
-        match event {
-            DexEvent::BlockMetaEvent(e) => {
-                println!("{:?}", e);
-            }
-            // .... other events
-            _ => {
-                println!("{:?}", event);
-            }
-        }
-    }
+    stopped
 }

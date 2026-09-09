@@ -1,9 +1,15 @@
+use solana_streamer_sdk::streaming::{
+    event_parser::{ParseOptions, ParsePlan},
+    yellowstone_grpc::{StreamEvent, SubscriptionRequest},
+};
 mod common;
 
 use solana_streamer_sdk::streaming::{
-    event_parser::{protocols::raydium_clmm::parser::RAYDIUM_CLMM_PROGRAM_ID, DexEvent, Protocol},
+    event_parser::{
+        protocols::raydium_clmm::parser::RAYDIUM_CLMM_PROGRAM_ID, AccountEvent, Protocol,
+    },
     grpc::ClientConfig,
-    yellowstone_grpc::{AccountFilter, TransactionFilter},
+    yellowstone_grpc::AccountFilter,
     YellowstoneGrpc,
 };
 
@@ -46,11 +52,6 @@ async fn subscribe_raydium_clmm_bitmap_extension() -> Result<(), Box<dyn std::er
     };
 
     // 交易过滤器（可选，如果只想订阅账户数据，可以留空）
-    let transaction_filter = TransactionFilter {
-        account_include: vec![],
-        account_exclude: vec![],
-        account_required: vec![],
-    };
 
     // 事件类型过滤器 - 只订阅 TickArrayBitmapExtension 账户事件
     use solana_streamer_sdk::streaming::event_parser::common::filter::EventTypeFilter;
@@ -64,81 +65,93 @@ async fn subscribe_raydium_clmm_bitmap_extension() -> Result<(), Box<dyn std::er
 
     println!("开始订阅...");
 
-    grpc.subscribe_events_immediate(
-        protocols,
-        None,
-        vec![transaction_filter],
-        vec![account_filter],
-        event_type_filter,
-        None,
-        callback,
-    )
-    .await?;
+    let plan = ParsePlan::new(
+        &protocols,
+        event_type_filter.as_ref().map(
+            |f: &solana_streamer_sdk::streaming::event_parser::common::filter::EventTypeFilter| {
+                f.include.as_slice()
+            },
+        ),
+        ParseOptions::default(),
+    );
+    let mut request = SubscriptionRequest::new(plan);
+    request.transactions = Vec::new();
+    request.accounts = vec![account_filter];
+    grpc.subscribe(request, callback).await?;
 
     println!("等待 Ctrl+C 停止...");
     let shutdown = common::wait_for_shutdown(&grpc.subscription_handle).await;
-    grpc.stop().await;
+    let stopped = grpc.stop().await;
     shutdown?;
+    stopped?;
 
     Ok(())
 }
 
-fn create_event_callback() -> impl Fn(DexEvent) {
-    |event: DexEvent| {
-        match event {
-            DexEvent::RaydiumClmmTickArrayBitmapExtensionAccountEvent(e) => {
-                println!("=== Raydium CLMM TickArrayBitmapExtension 账户更新 ===");
-                println!("账户地址: {}", e.pubkey);
-                println!("Pool ID: {}", e.tick_array_bitmap_extension.pool_id);
-                println!("Executable: {}", e.executable);
-                println!("Lamports: {}", e.lamports);
-                println!("Owner: {}", e.owner);
-                println!("Rent Epoch: {}", e.rent_epoch);
-                println!("Slot: {}", e.metadata.slot);
-                println!("Signature: {}", e.metadata.signature);
+fn create_event_callback() -> impl for<'a> FnMut(StreamEvent<'a>) {
+    |stream| {
+        let StreamEvent::Account(view) = stream else {
+            return;
+        };
+        let Some(event) = view.decode() else {
+            return;
+        };
+        {
+            match event {
+                AccountEvent::RaydiumClmmTickArrayBitmapExtensionAccountEvent(e) => {
+                    println!("=== Raydium CLMM TickArrayBitmapExtension 账户更新 ===");
+                    println!("账户地址: {}", e.pubkey);
+                    println!("Pool ID: {}", e.tick_array_bitmap_extension.pool_id);
+                    println!("Executable: {}", e.executable);
+                    println!("Lamports: {}", e.lamports);
+                    println!("Owner: {}", e.owner);
+                    println!("Rent Epoch: {}", e.rent_epoch);
+                    println!("Slot: {}", view.frame.slot);
+                    println!("Signature: {}", view.frame.signature);
 
-                // 由于使用了 #[repr(C, packed)]，需要先复制数据到本地变量
-                let positive_bitmap = e.tick_array_bitmap_extension.positive_tick_array_bitmap;
-                let negative_bitmap = e.tick_array_bitmap_extension.negative_tick_array_bitmap;
+                    // 由于使用了 #[repr(C, packed)]，需要先复制数据到本地变量
+                    let positive_bitmap = e.tick_array_bitmap_extension.positive_tick_array_bitmap;
+                    let negative_bitmap = e.tick_array_bitmap_extension.negative_tick_array_bitmap;
 
-                // 打印 positive_tick_array_bitmap 的统计信息
-                let positive_non_zero_count =
-                    positive_bitmap.iter().flatten().filter(|&&x| x != 0).count();
-                println!("Positive Tick Array Bitmap: {} 个非零值", positive_non_zero_count);
+                    // 打印 positive_tick_array_bitmap 的统计信息
+                    let positive_non_zero_count =
+                        positive_bitmap.iter().flatten().filter(|&&x| x != 0).count();
+                    println!("Positive Tick Array Bitmap: {} 个非零值", positive_non_zero_count);
 
-                // 打印 negative_tick_array_bitmap 的统计信息
-                let negative_non_zero_count =
-                    negative_bitmap.iter().flatten().filter(|&&x| x != 0).count();
-                println!("Negative Tick Array Bitmap: {} 个非零值", negative_non_zero_count);
+                    // 打印 negative_tick_array_bitmap 的统计信息
+                    let negative_non_zero_count =
+                        negative_bitmap.iter().flatten().filter(|&&x| x != 0).count();
+                    println!("Negative Tick Array Bitmap: {} 个非零值", negative_non_zero_count);
 
-                // 可选：打印前几个非零值作为示例
-                println!("\nPositive Bitmap 前 5 个非零值:");
-                let mut count = 0;
-                for (i, row) in positive_bitmap.iter().enumerate() {
-                    for (j, &value) in row.iter().enumerate() {
-                        if value != 0 && count < 5 {
-                            println!("  [{}][{}] = {}", i, j, value);
-                            count += 1;
+                    // 可选：打印前几个非零值作为示例
+                    println!("\nPositive Bitmap 前 5 个非零值:");
+                    let mut count = 0;
+                    for (i, row) in positive_bitmap.iter().enumerate() {
+                        for (j, &value) in row.iter().enumerate() {
+                            if value != 0 && count < 5 {
+                                println!("  [{}][{}] = {}", i, j, value);
+                                count += 1;
+                            }
                         }
                     }
-                }
 
-                println!("\nNegative Bitmap 前 5 个非零值:");
-                let mut count = 0;
-                for (i, row) in negative_bitmap.iter().enumerate() {
-                    for (j, &value) in row.iter().enumerate() {
-                        if value != 0 && count < 5 {
-                            println!("  [{}][{}] = {}", i, j, value);
-                            count += 1;
+                    println!("\nNegative Bitmap 前 5 个非零值:");
+                    let mut count = 0;
+                    for (i, row) in negative_bitmap.iter().enumerate() {
+                        for (j, &value) in row.iter().enumerate() {
+                            if value != 0 && count < 5 {
+                                println!("  [{}][{}] = {}", i, j, value);
+                                count += 1;
+                            }
                         }
                     }
-                }
 
-                println!("=====================================\n");
-            }
-            _ => {
-                // 其他事件类型，可以忽略或记录
-                // println!("其他事件类型: {:?}", event.metadata().event_type);
+                    println!("=====================================\n");
+                }
+                _ => {
+                    // 其他事件类型，可以忽略或记录
+                    // println!("其他事件类型: {:?}", event.metadata().event_type);
+                }
             }
         }
     }

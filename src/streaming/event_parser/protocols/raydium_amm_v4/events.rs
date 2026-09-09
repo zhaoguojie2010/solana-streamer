@@ -162,7 +162,7 @@ pub struct RaydiumAmmV4AmmInfoAccountEvent {
     pub rent_epoch: u64,
     #[borsh(skip)]
     #[serde(skip)]
-    pub raw_account_data: Vec<u8>,
+    pub raw_account_data: bytes::Bytes,
     pub amm_info: AmmInfo,
 }
 

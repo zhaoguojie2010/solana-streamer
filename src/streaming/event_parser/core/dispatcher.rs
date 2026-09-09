@@ -17,7 +17,7 @@ use crate::streaming::event_parser::{
         raydium_amm_v4::parser as raydium_amm_v4, raydium_clmm::parser as raydium_clmm,
         raydium_cpmm::parser as raydium_cpmm, whirlpool::parser as whirlpool,
     },
-    DexEvent, Protocol,
+    AccountEvent, InstructionAccounts, Protocol, TxEvent,
 };
 use solana_sdk::pubkey::Pubkey;
 
@@ -37,15 +37,16 @@ impl EventDispatcher {
     /// - `metadata`: 事件元数据
     ///
     /// # 返回
-    /// 解析成功返回 `Some(DexEvent)`，否则返回 `None`
+    /// 解析成功返回 `Some(TxEvent)`，否则返回 `None`
     #[inline]
     pub fn dispatch_instruction(
         protocol: Protocol,
         instruction_discriminator: &[u8],
         instruction_data: &[u8],
-        accounts: &[Pubkey],
+        accounts: InstructionAccounts<'_>,
         mut metadata: EventMetadata,
-    ) -> Option<DexEvent> {
+        tx: &crate::streaming::event_parser::TxMetadata,
+    ) -> Option<TxEvent> {
         // 根据协议类型设置 metadata.protocol
         use crate::streaming::event_parser::common::ProtocolType;
         metadata.protocol = match protocol {
@@ -109,6 +110,7 @@ impl EventDispatcher {
                 instruction_data,
                 accounts,
                 metadata,
+                tx,
             ),
             Protocol::MeteoraDlmm => meteora_dlmm::parse_meteora_dlmm_instruction_data(
                 instruction_discriminator,
@@ -134,14 +136,14 @@ impl EventDispatcher {
     /// - `metadata`: 事件元数据
     ///
     /// # 返回
-    /// 解析成功返回 `Some(DexEvent)`，否则返回 `None`
+    /// 解析成功返回 `Some(TxEvent)`，否则返回 `None`
     #[inline]
     pub fn dispatch_inner_instruction(
         protocol: Protocol,
         inner_instruction_discriminator: &[u8],
         inner_instruction_data: &[u8],
         mut metadata: EventMetadata,
-    ) -> Option<DexEvent> {
+    ) -> Option<TxEvent> {
         // 根据协议类型设置 metadata.protocol
         use crate::streaming::event_parser::common::ProtocolType;
         metadata.protocol = match protocol {
@@ -254,12 +256,12 @@ impl EventDispatcher {
     /// - `metadata`: 事件元数据
     ///
     /// # 返回
-    /// 解析成功返回 `Some(DexEvent)`，否则返回 `None`
+    /// 解析成功返回 `Some(TxEvent)`，否则返回 `None`
     #[inline]
     pub fn dispatch_compute_budget_instruction(
         instruction_data: &[u8],
         metadata: EventMetadata,
-    ) -> Option<DexEvent> {
+    ) -> Option<TxEvent> {
         CommonEventParser::parse_compute_budget_instruction(instruction_data, metadata)
     }
 
@@ -296,13 +298,13 @@ impl EventDispatcher {
     /// - `metadata`: 事件元数据
     ///
     /// # 返回
-    /// 解析成功返回 `Some(DexEvent)`，否则返回 `None`
+    /// 解析成功返回 `Some(TxEvent)`，否则返回 `None`
     pub fn dispatch_account(
         protocol: Protocol,
         discriminator: &[u8],
-        account: crate::streaming::grpc::AccountPretty,
+        account: crate::streaming::grpc::AccountFrame,
         mut metadata: crate::streaming::event_parser::common::EventMetadata,
-    ) -> Option<DexEvent> {
+    ) -> Option<AccountEvent> {
         // 根据协议类型设置 metadata.protocol
         use crate::streaming::event_parser::common::ProtocolType;
         metadata.protocol = match protocol {

@@ -420,7 +420,7 @@ pub struct PumpSwapGlobalConfigAccountEvent {
     pub rent_epoch: u64,
     #[borsh(skip)]
     #[serde(skip)]
-    pub raw_account_data: Vec<u8>,
+    pub raw_account_data: bytes::Bytes,
     pub global_config: GlobalConfig,
 }
 
@@ -436,7 +436,7 @@ pub struct PumpSwapPoolAccountEvent {
     pub rent_epoch: u64,
     #[borsh(skip)]
     #[serde(skip)]
-    pub raw_account_data: Vec<u8>,
+    pub raw_account_data: bytes::Bytes,
     pub pool: Pool,
 }
 

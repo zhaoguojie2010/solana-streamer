@@ -1,3 +1,7 @@
+use solana_streamer_sdk::streaming::{
+    event_parser::{ParseOptions, ParsePlan},
+    yellowstone_grpc::{StreamEvent, SubscriptionRequest},
+};
 mod common;
 
 use std::str::FromStr;
@@ -6,10 +10,10 @@ use solana_sdk::pubkey::Pubkey;
 use solana_streamer_sdk::streaming::{
     event_parser::{
         common::{filter::EventTypeFilter, EventType},
-        DexEvent,
+        AccountEvent,
     },
     grpc::ClientConfig,
-    yellowstone_grpc::{AccountFilter, TransactionFilter},
+    yellowstone_grpc::AccountFilter,
     YellowstoneGrpc,
 };
 use yellowstone_grpc_proto::geyser::{
@@ -40,13 +44,8 @@ async fn test_grpc() -> Result<(), Box<dyn std::error::Error>> {
     let protocols = vec![];
     println!("Protocols to monitor: {:?}", protocols);
     // Filter accounts
-    let account_include = vec![];
-    let account_exclude = vec![];
-    let account_required = vec![];
 
     // Listen to transaction data
-    let transaction_filter =
-        TransactionFilter { account_include, account_exclude, account_required };
 
     let pump = Pubkey::from_str("pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn").unwrap();
     let usdc = Pubkey::from_str("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v").unwrap();
@@ -80,30 +79,42 @@ async fn test_grpc() -> Result<(), Box<dyn std::error::Error>> {
     println!("Starting to listen for events, press Ctrl+C to stop...");
     println!("Starting subscription...");
 
-    grpc.subscribe_events_immediate(
-        protocols.clone(),
-        None,
-        vec![transaction_filter.clone()],
-        vec![all_pump_ata.clone(), all_usdc_ata.clone()],
-        event_type_filter.clone(),
-        None,
-        callback,
-    )
-    .await?;
+    let plan = ParsePlan::new(
+        &protocols,
+        event_type_filter.as_ref().map(
+            |f: &solana_streamer_sdk::streaming::event_parser::common::filter::EventTypeFilter| {
+                f.include.as_slice()
+            },
+        ),
+        ParseOptions::default(),
+    );
+    let mut request = SubscriptionRequest::new(plan);
+    request.transactions = Vec::new();
+    request.accounts = vec![all_pump_ata, all_usdc_ata];
+    grpc.subscribe(request, callback).await?;
 
     println!("Waiting for Ctrl+C to stop...");
     let shutdown = common::wait_for_shutdown(&grpc.subscription_handle).await;
-    grpc.stop().await;
+    let stopped = grpc.stop().await;
     shutdown?;
+    stopped?;
 
     Ok(())
 }
 
-fn create_event_callback() -> impl Fn(DexEvent) {
-    |event: DexEvent| match event {
-        DexEvent::TokenAccountEvent(e) => {
-            println!("TokenAccount: {:?} amount: {:?}", e.pubkey, e.amount);
+fn create_event_callback() -> impl for<'a> FnMut(StreamEvent<'a>) {
+    |stream| {
+        let StreamEvent::Account(view) = stream else {
+            return;
+        };
+        let Some(event) = view.decode() else {
+            return;
+        };
+        match event {
+            AccountEvent::TokenAccountEvent(e) => {
+                println!("TokenAccount: {:?} amount: {:?}", e.pubkey, e.amount);
+            }
+            _ => {}
         }
-        _ => {}
     }
 }

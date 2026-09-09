@@ -6,9 +6,9 @@ use crate::streaming::{
     event_parser::{
         common::{EventMetadata, EventType},
         protocols::pumpfun::{PumpFunBondingCurveAccountEvent, PumpFunGlobalAccountEvent},
-        DexEvent,
+        AccountEvent,
     },
-    grpc::AccountPretty,
+    grpc::AccountFrame,
 };
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, BorshDeserialize)]
@@ -33,16 +33,16 @@ pub fn bonding_curve_decode(data: &[u8]) -> Option<BondingCurve> {
 }
 
 pub fn bonding_curve_parser(
-    account: AccountPretty,
+    account: AccountFrame,
     mut metadata: EventMetadata,
-) -> Option<DexEvent> {
+) -> Option<AccountEvent> {
     metadata.event_type = EventType::AccountPumpFunBondingCurve;
 
     if account.data.len() < BONDING_CURVE_SIZE + 8 {
         return None;
     }
     if let Some(bonding_curve) = bonding_curve_decode(&account.data[8..BONDING_CURVE_SIZE + 8]) {
-        Some(DexEvent::PumpFunBondingCurveAccountEvent(PumpFunBondingCurveAccountEvent {
+        Some(AccountEvent::PumpFunBondingCurveAccountEvent(PumpFunBondingCurveAccountEvent {
             metadata,
             pubkey: account.pubkey,
             executable: account.executable,
@@ -90,14 +90,14 @@ pub fn global_decode(data: &[u8]) -> Option<Global> {
     borsh::from_slice::<Global>(&data[..GLOBAL_SIZE]).ok()
 }
 
-pub fn global_parser(account: AccountPretty, mut metadata: EventMetadata) -> Option<DexEvent> {
+pub fn global_parser(account: AccountFrame, mut metadata: EventMetadata) -> Option<AccountEvent> {
     metadata.event_type = EventType::AccountPumpFunGlobal;
 
     if account.data.len() < GLOBAL_SIZE + 8 {
         return None;
     }
     if let Some(global) = global_decode(&account.data[8..GLOBAL_SIZE + 8]) {
-        Some(DexEvent::PumpFunGlobalAccountEvent(PumpFunGlobalAccountEvent {
+        Some(AccountEvent::PumpFunGlobalAccountEvent(PumpFunGlobalAccountEvent {
             metadata,
             pubkey: account.pubkey,
             executable: account.executable,

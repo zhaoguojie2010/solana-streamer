@@ -6,9 +6,9 @@ use crate::streaming::{
     event_parser::{
         common::{EventMetadata, EventType},
         protocols::pumpswap::{PumpSwapGlobalConfigAccountEvent, PumpSwapPoolAccountEvent},
-        DexEvent,
+        AccountEvent,
     },
-    grpc::AccountPretty,
+    grpc::AccountFrame,
 };
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, BorshDeserialize)]
@@ -37,16 +37,16 @@ pub fn global_config_decode(data: &[u8]) -> Option<GlobalConfig> {
 }
 
 pub fn global_config_parser(
-    account: AccountPretty,
+    account: AccountFrame,
     mut metadata: EventMetadata,
-) -> Option<DexEvent> {
+) -> Option<AccountEvent> {
     metadata.event_type = EventType::AccountPumpSwapGlobalConfig;
 
     if account.data.len() < GLOBAL_CONFIG_SIZE + 8 {
         return None;
     }
     if let Some(config) = global_config_decode(&account.data[8..GLOBAL_CONFIG_SIZE + 8]) {
-        Some(DexEvent::PumpSwapGlobalConfigAccountEvent(PumpSwapGlobalConfigAccountEvent {
+        Some(AccountEvent::PumpSwapGlobalConfigAccountEvent(PumpSwapGlobalConfigAccountEvent {
             metadata,
             pubkey: account.pubkey,
             executable: account.executable,
@@ -93,14 +93,14 @@ pub fn pool_decode(data: &[u8]) -> Option<Pool> {
     Some(pool)
 }
 
-pub fn pool_parser(account: AccountPretty, mut metadata: EventMetadata) -> Option<DexEvent> {
+pub fn pool_parser(account: AccountFrame, mut metadata: EventMetadata) -> Option<AccountEvent> {
     metadata.event_type = EventType::AccountPumpSwapPool;
 
     if account.data.len() < POOL_SIZE + 8 {
         return None;
     }
     if let Some(pool) = pool_decode(&account.data[8..]) {
-        Some(DexEvent::PumpSwapPoolAccountEvent(PumpSwapPoolAccountEvent {
+        Some(AccountEvent::PumpSwapPoolAccountEvent(PumpSwapPoolAccountEvent {
             metadata,
             pubkey: account.pubkey,
             executable: account.executable,

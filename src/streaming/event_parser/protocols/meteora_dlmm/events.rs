@@ -62,9 +62,6 @@ pub enum MeteoraDlmmInstructionKind {
 pub struct MeteoraDlmmInstructionEvent {
     pub metadata: EventMetadata,
     pub kind: MeteoraDlmmInstructionKind,
-    pub accounts: Vec<Pubkey>,
-    /// Anchor instruction payload after the 8-byte discriminator.
-    pub data: Vec<u8>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -111,7 +108,7 @@ pub struct MeteoraDlmmSwapEvent {
     pub token_y_program: Pubkey,
     pub event_authority: Pubkey,
     pub program: Pubkey,
-    pub remaining_accounts: Vec<Pubkey>,
+    pub remaining_account_indices: Vec<u8>,
 }
 
 /// Meteora DLMM swap result from CPI log
@@ -169,7 +166,7 @@ pub struct MeteoraDlmmSwap2Event {
     pub memo_program: Pubkey,
     pub event_authority: Pubkey,
     pub program: Pubkey,
-    pub remaining_accounts: Vec<Pubkey>,
+    pub remaining_account_indices: Vec<u8>,
 }
 
 /// Raw swap CPI event payload
@@ -210,7 +207,7 @@ pub struct MeteoraDlmmLbPairAccountEvent {
     pub owner: Pubkey,
     pub rent_epoch: u64,
     #[serde(skip)]
-    pub raw_account_data: Vec<u8>,
+    pub raw_account_data: bytes::Bytes,
     pub lb_pair: LbPair,
 }
 
@@ -224,7 +221,7 @@ pub struct MeteoraDlmmBinArrayAccountEvent {
     pub owner: Pubkey,
     pub rent_epoch: u64,
     #[serde(skip)]
-    pub raw_account_data: Vec<u8>,
+    pub raw_account_data: bytes::Bytes,
     pub bin_array: BinArray,
 }
 
@@ -238,7 +235,7 @@ pub struct MeteoraDlmmBinArrayBitmapExtensionAccountEvent {
     pub owner: Pubkey,
     pub rent_epoch: u64,
     #[serde(skip)]
-    pub raw_account_data: Vec<u8>,
+    pub raw_account_data: bytes::Bytes,
     pub bin_array_bitmap_extension: BinArrayBitmapExtension,
 }
 

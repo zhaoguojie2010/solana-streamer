@@ -1,8 +1,6 @@
-use crate::streaming::event_parser::common::high_performance_clock::elapsed_micros_since;
 use crate::streaming::event_parser::common::types::{EventType, ProtocolType};
 use crate::streaming::event_parser::common::EventMetadata;
-use crate::streaming::event_parser::core::traits::DexEvent;
-use crate::streaming::event_parser::protocols::block::block_meta_event::BlockMetaEvent;
+use crate::streaming::event_parser::core::traits::TxEvent;
 use borsh::BorshDeserialize;
 use serde::{Deserialize, Serialize};
 use solana_sdk::pubkey::Pubkey;
@@ -32,22 +30,11 @@ pub struct SetComputeUnitPriceEvent {
 pub struct CommonEventParser {}
 
 impl CommonEventParser {
-    pub fn generate_block_meta_event(
-        slot: u64,
-        block_hash: String,
-        block_time_ms: i64,
-        recv_us: i64,
-    ) -> DexEvent {
-        let mut block_meta_event = BlockMetaEvent::new(slot, block_hash, block_time_ms, recv_us);
-        block_meta_event.metadata.handle_us = elapsed_micros_since(recv_us);
-        DexEvent::BlockMetaEvent(block_meta_event)
-    }
-
     /// 解析 Compute Budget 指令
     pub fn parse_compute_budget_instruction(
         instruction_data: &[u8],
         mut metadata: EventMetadata,
-    ) -> Option<DexEvent> {
+    ) -> Option<TxEvent> {
         if instruction_data.is_empty() {
             return None;
         }
@@ -65,7 +52,7 @@ impl CommonEventParser {
                 let units = u32::from_le_bytes(instruction_data[1..5].try_into().ok()?);
                 metadata.event_type = EventType::SetComputeUnitLimit;
                 let event = SetComputeUnitLimitEvent { metadata, units };
-                Some(DexEvent::SetComputeUnitLimitEvent(event))
+                Some(TxEvent::SetComputeUnitLimitEvent(event))
             }
             // SetComputeUnitPrice: discriminator = 3
             3 => {
@@ -75,7 +62,7 @@ impl CommonEventParser {
                 let micro_lamports = u64::from_le_bytes(instruction_data[1..9].try_into().ok()?);
                 metadata.event_type = EventType::SetComputeUnitPrice;
                 let event = SetComputeUnitPriceEvent { metadata, micro_lamports };
-                Some(DexEvent::SetComputeUnitPriceEvent(event))
+                Some(TxEvent::SetComputeUnitPriceEvent(event))
             }
             _ => None,
         }

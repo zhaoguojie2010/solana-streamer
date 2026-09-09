@@ -1,62 +1,15 @@
+//! Transaction-local classification replaces global maps keyed by signature.
 mod common;
-
-use solana_streamer_sdk::streaming::event_parser::{
-    common::EventType,
-    protocols::bonk::types::TradeDirection,
-    protocols::{
-        bonk::parser::BONK_PROGRAM_ID, meteora_damm_v2::parser::METEORA_DAMM_V2_PROGRAM_ID,
-        meteora_dlmm::parser::METEORA_DLMM_PROGRAM_ID, pancakeswap::parser::PANCAKESWAP_PROGRAM_ID,
-        pumpfun::parser::PUMPFUN_PROGRAM_ID, pumpswap::parser::PUMPSWAP_PROGRAM_ID,
-        raydium_amm_v4::parser::RAYDIUM_AMM_V4_PROGRAM_ID,
-        raydium_clmm::parser::RAYDIUM_CLMM_PROGRAM_ID,
-        raydium_cpmm::parser::RAYDIUM_CPMM_PROGRAM_ID, whirlpool::parser::WHIRLPOOL_PROGRAM_ID,
-    },
-    DexEvent, Protocol,
-};
 use solana_streamer_sdk::streaming::{
-    grpc::ClientConfig,
-    yellowstone_grpc::{AccountFilter, TransactionFilter},
+    event_parser::{ParseOptions, ParsePlan, Protocol, TxSwapKind},
+    yellowstone_grpc::{StreamEvent, SubscriptionRequest, TransactionFilter},
     YellowstoneGrpc,
 };
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-
-#[derive(Clone)]
-struct InnerSwapLeg {
-    inner_ix: i64,
-    dex_program: String,
-    pool_id: String,
-    event_type: EventType,
-    from_mint: String,
-    to_mint: String,
-}
-
-#[derive(Default)]
-struct ArbTraceState {
-    // (signature, outer_ix) -> outer program id
-    outer_program_by_ix: HashMap<(String, i64), String>,
-    // (signature, outer_ix) -> all inner swap legs
-    swap_legs_by_ix: HashMap<(String, i64), Vec<InnerSwapLeg>>,
-    // (signature, outer_ix) -> last printed leg count
-    printed_group_leg_count: HashMap<(String, i64), usize>,
-}
-
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> anyhow::Result<()> {
     env_logger::init();
-    println!("Starting arb-event detection example...");
-    subscribe_arb_events().await
-}
-
-async fn subscribe_arb_events() -> Result<(), Box<dyn std::error::Error>> {
-    let mut config = ClientConfig::default();
-    config.enable_metrics = true;
-
-    let grpc =
-        YellowstoneGrpc::new_with_config(common::grpc_endpoint()?, common::grpc_token()?, config)?;
-
-    let protocols = vec![
-        Protocol::PancakeSwap,
+    let client = YellowstoneGrpc::new(common::grpc_endpoint()?, common::grpc_token()?)?;
+    let protocols = [
         Protocol::PumpFun,
         Protocol::PumpSwap,
         Protocol::Bonk,
@@ -66,273 +19,57 @@ async fn subscribe_arb_events() -> Result<(), Box<dyn std::error::Error>> {
         Protocol::MeteoraDammV2,
         Protocol::MeteoraDlmm,
         Protocol::Whirlpool,
+        Protocol::PancakeSwap,
     ];
-
-    let account_include = vec![
-        PANCAKESWAP_PROGRAM_ID.to_string(),
-        PUMPFUN_PROGRAM_ID.to_string(),
-        PUMPSWAP_PROGRAM_ID.to_string(),
-        BONK_PROGRAM_ID.to_string(),
-        RAYDIUM_CPMM_PROGRAM_ID.to_string(),
-        RAYDIUM_CLMM_PROGRAM_ID.to_string(),
-        RAYDIUM_AMM_V4_PROGRAM_ID.to_string(),
-        METEORA_DAMM_V2_PROGRAM_ID.to_string(),
-        METEORA_DLMM_PROGRAM_ID.to_string(),
-        WHIRLPOOL_PROGRAM_ID.to_string(),
-    ];
-
-    let tx_filter = TransactionFilter {
-        account_include: account_include.clone(),
-        account_exclude: vec![],
-        account_required: vec![],
-    };
-    let account_filter = AccountFilter {
-        account: vec![],
-        owner: account_include,
-        filters: vec![],
-        cuckoo_accounts_filter: None,
-    };
-
-    let callback = create_arb_callback();
-
-    println!("Subscribing... press Ctrl+C to stop.");
-    grpc.subscribe_events_immediate(
-        protocols,
+    let plan = ParsePlan::new(
+        &protocols,
         None,
-        vec![tx_filter],
-        vec![account_filter],
-        None,
-        None,
-        callback,
-    )
-    .await?;
-
-    let shutdown = common::wait_for_shutdown(&grpc.subscription_handle).await;
-    grpc.stop().await;
-    shutdown?;
-    Ok(())
-}
-
-fn create_arb_callback() -> impl Fn(DexEvent) + Send + Sync + 'static {
-    let state = Arc::new(Mutex::new(ArbTraceState::default()));
-
-    move |event: DexEvent| {
-        let metadata = event.metadata();
-        let signature = metadata.signature.to_string();
-        let key = (signature.clone(), metadata.outer_index);
-
-        if metadata.inner_index.is_none() {
-            if let Ok(mut guard) = state.lock() {
-                guard.outer_program_by_ix.insert(key, metadata.program_id.to_string());
-                if guard.outer_program_by_ix.len() > 20_000
-                    || guard.swap_legs_by_ix.len() > 20_000
-                    || guard.printed_group_leg_count.len() > 20_000
-                {
-                    guard.outer_program_by_ix.clear();
-                    guard.swap_legs_by_ix.clear();
-                    guard.printed_group_leg_count.clear();
-                }
-            }
-            return;
-        }
-
-        let Some(pool_id) = extract_pool_id(&event) else {
-            return;
-        };
-        let (from_mint, to_mint) = extract_route_mints(&event)
-            .map(|(from_mint, to_mint)| (from_mint.to_string(), to_mint.to_string()))
-            .unwrap_or_else(|| ("UNKNOWN".to_string(), "UNKNOWN".to_string()));
-        if !is_swap_event_type(&metadata.event_type) {
-            return;
-        }
-
-        println!(
-            "[INNER_SWAP] sig={} outer_ix={} inner_ix={} dex_program={} pool_id={} event_type={:?} route={} -> {}",
-            signature,
-            metadata.outer_index,
-            metadata.inner_index.unwrap_or_default(),
-            metadata.program_id,
-            pool_id,
-            metadata.event_type,
-            from_mint,
-            to_mint
-        );
-
-        let leg = InnerSwapLeg {
-            inner_ix: metadata.inner_index.unwrap_or_default(),
-            dex_program: metadata.program_id.to_string(),
-            pool_id,
-            event_type: metadata.event_type.clone(),
-            from_mint: from_mint.clone(),
-            to_mint: to_mint.clone(),
-        };
-
-        let mut should_print_group = false;
-        let mut group_snapshot: Vec<InnerSwapLeg> = Vec::new();
-        let mut entry_program = "UNKNOWN_OUTER_PROGRAM".to_string();
-
-        if let Ok(mut guard) = state.lock() {
-            if let Some(program) = guard.outer_program_by_ix.get(&key) {
-                entry_program = program.clone();
-            }
-
-            let last_printed_len = guard.printed_group_leg_count.get(&key).copied().unwrap_or(0);
-            let current_len = {
-                let legs = guard.swap_legs_by_ix.entry(key.clone()).or_default();
-                legs.push(leg);
-                let current_len = legs.len();
-                if current_len >= 2 && current_len > last_printed_len {
-                    group_snapshot = legs.clone();
-                }
-                current_len
-            };
-
-            if current_len >= 2 && current_len > last_printed_len {
-                should_print_group = true;
-                guard.printed_group_leg_count.insert(key.clone(), current_len);
-            }
-        }
-
-        if !should_print_group {
-            return;
-        }
-
-        group_snapshot.sort_by_key(|item| item.inner_ix);
-        let first_from = group_snapshot
-            .first()
-            .map(|x| x.from_mint.clone())
-            .unwrap_or_else(|| "UNKNOWN".to_string());
-        let last_to = group_snapshot
-            .last()
-            .map(|x| x.to_mint.clone())
-            .unwrap_or_else(|| "UNKNOWN".to_string());
-        let mut unique_pools: Vec<String> = Vec::new();
-        for leg in group_snapshot.iter() {
-            if !unique_pools.iter().any(|pool_id| pool_id == &leg.pool_id) {
-                unique_pools.push(leg.pool_id.clone());
-            }
-        }
-
-        println!("=== INNER SWAP GROUP ===");
-        println!("signature: {}", signature);
-        println!("entry_program: {}", entry_program);
-        println!("outer_ix: {}", metadata.outer_index);
-        println!("hops: {}", group_snapshot.len());
-        println!("unique_pool_count: {}", unique_pools.len());
-        println!("group_route: {} -> {}", first_from, last_to);
-        println!("legs:");
-        for leg in group_snapshot.iter() {
-            println!(
-                "  - inner_ix={} dex_program={} pool_id={} event_type={:?} route={} -> {}",
-                leg.inner_ix,
-                leg.dex_program,
-                leg.pool_id,
-                leg.event_type,
-                leg.from_mint,
-                leg.to_mint
-            );
-        }
-        println!("========================\n");
-    }
-}
-
-#[inline]
-fn is_swap_event_type(event_type: &EventType) -> bool {
-    matches!(
-        event_type,
-        EventType::PancakeSwapSwap
-            | EventType::PancakeSwapSwapV2
-            | EventType::PumpSwapBuy
-            | EventType::PumpSwapBuyExactQuoteIn
-            | EventType::PumpSwapSell
-            | EventType::PumpFunBuy
-            | EventType::PumpFunSell
-            | EventType::BonkBuyExactIn
-            | EventType::BonkBuyExactOut
-            | EventType::BonkSellExactIn
-            | EventType::BonkSellExactOut
-            | EventType::RaydiumCpmmSwapBaseInput
-            | EventType::RaydiumCpmmSwapBaseOutput
-            | EventType::RaydiumClmmSwap
-            | EventType::RaydiumClmmSwapV2
-            | EventType::RaydiumAmmV4SwapBaseIn
-            | EventType::RaydiumAmmV4SwapBaseOut
-            | EventType::MeteoraDammV2Swap
-            | EventType::MeteoraDammV2Swap2
-            | EventType::MeteoraDlmmSwap
-            | EventType::MeteoraDlmmSwap2
-            | EventType::WhirlpoolSwap
-            | EventType::WhirlpoolSwapV2
-    )
-}
-
-#[inline]
-fn extract_pool_id(event: &DexEvent) -> Option<String> {
-    let pool = match event {
-        DexEvent::PumpSwapBuyEvent(e) => e.pool,
-        DexEvent::PumpSwapBuyExactQuoteInEvent(e) => e.pool,
-        DexEvent::PumpSwapSellEvent(e) => e.pool,
-        DexEvent::PancakeSwapSwapEvent(e) => e.pool_state,
-        DexEvent::PancakeSwapSwapV2Event(e) => e.pool_state,
-        DexEvent::PumpFunTradeEvent(e) => e.bonding_curve,
-        DexEvent::BonkTradeEvent(e) => e.pool_state,
-        DexEvent::RaydiumCpmmSwapEvent(e) => e.pool_state,
-        DexEvent::RaydiumClmmSwapEvent(e) => e.pool_state,
-        DexEvent::RaydiumClmmSwapV2Event(e) => e.pool_state,
-        DexEvent::RaydiumAmmV4SwapEvent(e) => e.amm,
-        DexEvent::MeteoraDammV2SwapEvent(e) => e.pool,
-        DexEvent::MeteoraDammV2Swap2Event(e) => e.pool,
-        DexEvent::MeteoraDlmmSwapEvent(e) => e.lb_pair,
-        DexEvent::MeteoraDlmmSwap2Event(e) => e.lb_pair,
-        DexEvent::WhirlpoolSwapEvent(e) => e.whirlpool,
-        DexEvent::WhirlpoolSwapV2Event(e) => e.whirlpool,
-        _ => return None,
-    };
-    Some(pool.to_string())
-}
-
-#[inline]
-fn extract_route_mints(
-    event: &DexEvent,
-) -> Option<(solana_sdk::pubkey::Pubkey, solana_sdk::pubkey::Pubkey)> {
-    let (from_mint, to_mint) = match event {
-        DexEvent::PumpSwapBuyEvent(e) => (e.quote_mint, e.base_mint),
-        DexEvent::PumpSwapBuyExactQuoteInEvent(e) => (e.quote_mint, e.base_mint),
-        DexEvent::PumpSwapSellEvent(e) => (e.base_mint, e.quote_mint),
-        DexEvent::PancakeSwapSwapV2Event(e) => (e.input_mint, e.output_mint),
-        DexEvent::BonkTradeEvent(e) => match e.trade_direction {
-            TradeDirection::Buy => (e.quote_token_mint, e.base_token_mint),
-            TradeDirection::Sell => (e.base_token_mint, e.quote_token_mint),
+        ParseOptions {
+            classify_swaps: true,
+            enrich_logs: true,
+            retain_instructions: true,
+            ..ParseOptions::default()
         },
-        DexEvent::RaydiumCpmmSwapEvent(e) => (e.input_token_mint, e.output_token_mint),
-        DexEvent::RaydiumClmmSwapV2Event(e) => (e.input_vault_mint, e.output_vault_mint),
-        DexEvent::MeteoraDlmmSwapEvent(e) => {
-            if e.swap_for_y {
-                (e.token_x_mint?, e.token_y_mint?)
-            } else {
-                (e.token_y_mint?, e.token_x_mint?)
+    );
+    let mut request = SubscriptionRequest::new(plan);
+    request.transactions = vec![TransactionFilter {
+        account_include: protocols
+            .iter()
+            .flat_map(Protocol::get_program_id)
+            .map(|key| key.to_string())
+            .collect(),
+        ..TransactionFilter::default()
+    }];
+    client
+        .subscribe(request, |event| {
+            let StreamEvent::Transaction(batch) = event else {
+                return;
+            };
+            if !matches!(batch.summary.swap_kind, Some(TxSwapKind::Arb | TxSwapKind::Route)) {
+                return;
             }
-        }
-        DexEvent::MeteoraDlmmSwap2Event(e) => {
-            if e.swap_for_y {
-                (e.token_x_mint?, e.token_y_mint?)
-            } else {
-                (e.token_y_mint?, e.token_x_mint?)
+            println!(
+                "signature={} slot={} kind={:?}",
+                batch.meta.signature, batch.meta.slot, batch.summary.swap_kind
+            );
+            for event in batch.events {
+                let meta = event.metadata();
+                println!(
+                    "outer={} inner={:?} event={:?}",
+                    meta.outer_index, meta.inner_index, meta.event_type
+                );
+                if let Some(instruction) = batch.instruction(meta.instruction_index) {
+                    println!(
+                        "program={} data_bytes={}",
+                        instruction.program_id,
+                        instruction.data.len()
+                    );
+                }
             }
-        }
-        DexEvent::WhirlpoolSwapV2Event(e) => {
-            if e.a_to_b {
-                (e.token_mint_a, e.token_mint_b)
-            } else {
-                (e.token_mint_b, e.token_mint_a)
-            }
-        }
-        _ => return None,
-    };
-    if from_mint == solana_sdk::pubkey::Pubkey::default()
-        || to_mint == solana_sdk::pubkey::Pubkey::default()
-    {
-        return None;
-    }
-    Some((from_mint, to_mint))
+        })
+        .await?;
+    let shutdown = common::wait_for_shutdown(&client.subscription_handle).await;
+    let stopped = client.stop().await;
+    shutdown?;
+    stopped
 }

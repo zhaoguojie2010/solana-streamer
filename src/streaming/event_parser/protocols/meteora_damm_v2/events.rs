@@ -234,7 +234,7 @@ pub struct MeteoraDammV2InitializePoolEvent {
     #[borsh(skip)]
     pub config: Pubkey,
     #[borsh(skip)]
-    pub remaining_accounts: Vec<Pubkey>,
+    pub remaining_account_indices: Vec<u8>,
 }
 
 /// Meteora DAMM v2 Initialize Customizable Pool Event (对应 initialize_customizable_pool 指令)
@@ -302,7 +302,7 @@ pub struct MeteoraDammV2InitializeCustomizablePoolEvent {
     #[borsh(skip)]
     pub program: Pubkey,
     #[borsh(skip)]
-    pub remaining_accounts: Vec<Pubkey>,
+    pub remaining_account_indices: Vec<u8>,
 }
 
 /// Meteora DAMM v2 Initialize Pool With Dynamic Config Event (对应 initialize_pool_with_dynamic_config 指令)
@@ -414,8 +414,6 @@ pub struct MeteoraDammV2InstructionEvent {
     #[borsh(skip)]
     pub metadata: EventMetadata,
     pub kind: MeteoraDammV2InstructionKind,
-    pub accounts: Vec<Pubkey>,
-    pub data: Vec<u8>,
 }
 
 /// Meteora DAMM v2 pool 账户状态事件（由 gRPC account 订阅触发）。
@@ -433,7 +431,7 @@ pub struct MeteoraDammV2PoolStateAccountEvent {
     pub rent_epoch: u64,
     #[borsh(skip)]
     #[serde(skip)]
-    pub raw_account_data: Vec<u8>,
+    pub raw_account_data: bytes::Bytes,
 }
 
 pub mod discriminators {

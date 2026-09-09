@@ -1,9 +1,12 @@
 # 运行示例 / Running examples
 
-在项目根目录编译全部示例：
+在项目根目录编译示例 / Build examples from the repository root:
 
 ```bash
+# 默认仅编译 19 个 gRPC 示例，不启用 HTTP RPC
 cargo build --examples
+# 包括历史交易查询，共 20 个示例
+cargo build --examples --features rpc-client
 ```
 
 Yellowstone 示例从环境变量读取连接配置。默认 PublicNode 服务需要个人 token；
@@ -32,11 +35,10 @@ RUN_DURATION_SECS=10 cargo run --example meteora_dlmm_bin_array_account_subscrip
 cargo run --example nonce_listen_example
 cargo run --example token_balance_listen_example
 
-# 默认查询内置交易，也可以传入一个或多个交易签名；完成后自动退出
-cargo run --example parse_tx_events
-cargo run --example parse_tx_events -- <signature> [<signature> ...]
+# 提供一个或多个交易签名；完成后自动退出
+cargo run --features rpc-client --example parse_tx_events -- <signature> [<signature> ...]
 
-# 动态订阅示例按阶段执行，约一分钟后自动结束，不使用 RUN_DURATION_SECS
+# 动态订阅示例 10 秒后替换协议，仍遵循 RUN_DURATION_SECS
 cargo run --example dynamic_subscription
 ```
 
@@ -48,6 +50,25 @@ Meteora BinArray 等账户更新输出较多，可重定向到日志文件。
 All commands run from the repository root. Configure the environment variables above before
 starting an example. The default Yellowstone endpoint requires a personal token. Streaming
 examples stop on Ctrl+C or after `RUN_DURATION_SECS` (1000 seconds by default). The dynamic
-subscription example runs its own phases; transaction parsing exits when all signatures finish.
+subscription example switches protocols after 10 seconds; transaction parsing exits when all signatures finish.
 Account examples print updates only when the selected accounts change. Connection,
 authentication and RPC failures are reported in the logs.
+
+
+当前示例使用新的 `SubscriptionRequest` / `ParsePlan` 批次接口，接口迁移见
+[中文指南](../MIGRATION_CN.md) / [English guide](../MIGRATION.md)。
+
+- `grpc_example`：同步借用交易与账户视图。
+- `queued_subscription`：有界拥有型交付，可跨 await 使用批次，不克隆事件。
+- `*_swap_with_logs`：显式开启 `ParseOptions.enrich_logs`。
+- `arb_event_detection_with_cpi`：交易内分类，无按 signature 建立的全局 map。
+- `parse_tx_events`：启用 `rpc-client` 后，通过独立 `rpc` 模块适配历史交易；默认构建不包含该示例。
+
+```bash
+RUN_DURATION_SECS=10 cargo run --example queued_subscription
+cargo bench --bench parser_replay
+```
+
+The `parse_tx_events` example requires `--features rpc-client`. The lighter `rpc` feature
+exposes response adapters only and does not enable an HTTP client. The gRPC examples
+need neither feature.

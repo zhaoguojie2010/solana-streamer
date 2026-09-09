@@ -1,7 +1,11 @@
+use solana_streamer_sdk::streaming::{
+    event_parser::{ParseOptions, ParsePlan},
+    yellowstone_grpc::{StreamEvent, SubscriptionRequest},
+};
 mod common;
 
 use solana_streamer_sdk::streaming::event_parser::protocols::raydium_clmm::parser::RAYDIUM_CLMM_PROGRAM_ID;
-use solana_streamer_sdk::streaming::event_parser::{DexEvent, Protocol};
+use solana_streamer_sdk::streaming::event_parser::{Protocol, TxEvent};
 use solana_streamer_sdk::streaming::{
     grpc::ClientConfig, yellowstone_grpc::TransactionFilter, YellowstoneGrpc,
 };
@@ -42,75 +46,86 @@ async fn subscribe_raydium_clmm_swaps() -> Result<(), Box<dyn std::error::Error>
     println!("开始监听事件，按 Ctrl+C 停止...");
     println!("监控程序: {}", RAYDIUM_CLMM_PROGRAM_ID);
 
-    grpc.subscribe_events_immediate(
-        protocols,
-        None,
-        vec![transaction_filter],
-        vec![],
-        event_type_filter,
-        None,
-        callback,
-    )
-    .await?;
+    let plan = ParsePlan::new(
+        &protocols,
+        event_type_filter.as_ref().map(
+            |f: &solana_streamer_sdk::streaming::event_parser::common::filter::EventTypeFilter| {
+                f.include.as_slice()
+            },
+        ),
+        ParseOptions { enrich_logs: true, ..ParseOptions::default() },
+    );
+    let mut request = SubscriptionRequest::new(plan);
+    request.transactions = vec![transaction_filter];
+    request.accounts = Vec::new();
+    grpc.subscribe(request, callback).await?;
 
     println!("等待 Ctrl+C 停止...");
     let shutdown = common::wait_for_shutdown(&grpc.subscription_handle).await;
-    grpc.stop().await;
+    let stopped = grpc.stop().await;
     shutdown?;
+    stopped?;
 
     Ok(())
 }
 
-fn create_event_callback() -> impl Fn(DexEvent) {
-    |event: DexEvent| match event {
-        DexEvent::RaydiumClmmSwapEvent(e) => {
-            println!("=== Raydium CLMM Swap 事件 ===");
-            println!("事件类型: {:?}", e.metadata.event_type);
-            println!("交易签名: {}", e.metadata.signature);
-            println!("Slot: {}", e.metadata.slot);
-            println!("池状态: {}", e.pool_state);
-            println!("付款人: {}", e.payer);
-            println!("指令 amount: {}", e.amount);
-            println!("指令 other_amount_threshold: {}", e.other_amount_threshold);
-            println!("指令 sqrt_price_limit_x64: {}", e.sqrt_price_limit_x64);
-            println!("指令 is_base_input: {}", e.is_base_input);
-            println!("sender: {}", e.sender);
-            println!("token_account_0: {}", e.token_account_0);
-            println!("token_account_1: {}", e.token_account_1);
-            println!("amount_0: {}", e.amount_0);
-            println!("transfer_fee_0: {}", e.transfer_fee_0);
-            println!("amount_1: {}", e.amount_1);
-            println!("transfer_fee_1: {}", e.transfer_fee_1);
-            println!("zero_for_one: {}", e.zero_for_one);
-            println!("sqrt_price_x64: {}", e.sqrt_price_x64);
-            println!("liquidity: {}", e.liquidity);
-            println!("tick: {}", e.tick);
-            println!("=====================================\n");
+fn create_event_callback() -> impl for<'a> FnMut(StreamEvent<'a>) {
+    |stream| {
+        let StreamEvent::Transaction(batch) = stream else {
+            return;
+        };
+        for event in batch.events {
+            match event {
+                TxEvent::RaydiumClmmSwapEvent(e) => {
+                    println!("=== Raydium CLMM Swap 事件 ===");
+                    println!("事件类型: {:?}", e.metadata.event_type);
+                    println!("交易签名: {}", batch.meta.signature);
+                    println!("Slot: {}", batch.meta.slot);
+                    println!("池状态: {}", e.pool_state);
+                    println!("付款人: {}", e.payer);
+                    println!("指令 amount: {}", e.amount);
+                    println!("指令 other_amount_threshold: {}", e.other_amount_threshold);
+                    println!("指令 sqrt_price_limit_x64: {}", e.sqrt_price_limit_x64);
+                    println!("指令 is_base_input: {}", e.is_base_input);
+                    println!("sender: {}", e.sender);
+                    println!("token_account_0: {}", e.token_account_0);
+                    println!("token_account_1: {}", e.token_account_1);
+                    println!("amount_0: {}", e.amount_0);
+                    println!("transfer_fee_0: {}", e.transfer_fee_0);
+                    println!("amount_1: {}", e.amount_1);
+                    println!("transfer_fee_1: {}", e.transfer_fee_1);
+                    println!("zero_for_one: {}", e.zero_for_one);
+                    println!("sqrt_price_x64: {}", e.sqrt_price_x64);
+                    println!("liquidity: {}", e.liquidity);
+                    println!("tick: {}", e.tick);
+                    println!("=====================================\n");
+                }
+                TxEvent::RaydiumClmmSwapV2Event(e) => {
+                    println!("=== Raydium CLMM SwapV2 事件 ===");
+                    println!("事件类型: {:?}", e.metadata.event_type);
+                    println!("交易签名: {}", batch.meta.signature);
+                    println!("Slot: {}", batch.meta.slot);
+                    println!("池状态: {}", e.pool_state);
+                    println!("付款人: {}", e.payer);
+                    println!("指令 amount: {}", e.amount);
+                    println!("指令 other_amount_threshold: {}", e.other_amount_threshold);
+                    println!("指令 sqrt_price_limit_x64: {}", e.sqrt_price_limit_x64);
+                    println!("指令 is_base_input: {}", e.is_base_input);
+                    println!("sender: {}", e.sender);
+                    println!("token_account_0: {}", e.token_account_0);
+                    println!("token_account_1: {}", e.token_account_1);
+                    println!("amount_0: {}", e.amount_0);
+                    println!("transfer_fee_0: {}", e.transfer_fee_0);
+                    println!("amount_1: {}", e.amount_1);
+                    println!("transfer_fee_1: {}", e.transfer_fee_1);
+                    println!("zero_for_one: {}", e.zero_for_one);
+                    println!("sqrt_price_x64: {}", e.sqrt_price_x64);
+                    println!("liquidity: {}", e.liquidity);
+                    println!("tick: {}", e.tick);
+                    println!("=====================================\n");
+                }
+                _ => {}
+            }
         }
-        DexEvent::RaydiumClmmSwapV2Event(e) => {
-            println!("=== Raydium CLMM SwapV2 事件 ===");
-            println!("事件类型: {:?}", e.metadata.event_type);
-            println!("交易签名: {}", e.metadata.signature);
-            println!("Slot: {}", e.metadata.slot);
-            println!("池状态: {}", e.pool_state);
-            println!("付款人: {}", e.payer);
-            println!("指令 amount: {}", e.amount);
-            println!("指令 other_amount_threshold: {}", e.other_amount_threshold);
-            println!("指令 sqrt_price_limit_x64: {}", e.sqrt_price_limit_x64);
-            println!("指令 is_base_input: {}", e.is_base_input);
-            println!("sender: {}", e.sender);
-            println!("token_account_0: {}", e.token_account_0);
-            println!("token_account_1: {}", e.token_account_1);
-            println!("amount_0: {}", e.amount_0);
-            println!("transfer_fee_0: {}", e.transfer_fee_0);
-            println!("amount_1: {}", e.amount_1);
-            println!("transfer_fee_1: {}", e.transfer_fee_1);
-            println!("zero_for_one: {}", e.zero_for_one);
-            println!("sqrt_price_x64: {}", e.sqrt_price_x64);
-            println!("liquidity: {}", e.liquidity);
-            println!("tick: {}", e.tick);
-            println!("=====================================\n");
-        }
-        _ => {}
     }
 }

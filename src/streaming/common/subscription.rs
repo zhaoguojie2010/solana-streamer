@@ -1,47 +1,28 @@
-use tokio::task::JoinHandle;
+use tokio::{sync::oneshot, task::JoinHandle};
 
-/// Subscription handle for managing and stopping subscriptions
+/// A subscription owns one reader/parser task. Graceful shutdown finishes the current
+/// synchronous callback, closes production, and leaves accepted queue items available to drain.
 pub struct SubscriptionHandle {
-    stream_handle: JoinHandle<()>,
-    event_handle: Option<JoinHandle<()>>,
-    metrics_handle: Option<JoinHandle<()>>,
+    task: JoinHandle<anyhow::Result<()>>,
+    shutdown: Option<oneshot::Sender<()>>,
 }
-
 impl SubscriptionHandle {
-    /// Create a new subscription handle
-    pub fn new(
-        stream_handle: JoinHandle<()>,
-        event_handle: Option<JoinHandle<()>>,
-        metrics_handle: Option<JoinHandle<()>>,
-    ) -> Self {
-        Self { stream_handle, event_handle, metrics_handle }
+    pub(crate) fn new(task: JoinHandle<anyhow::Result<()>>, shutdown: oneshot::Sender<()>) -> Self {
+        Self { task, shutdown: Some(shutdown) }
     }
-
-    /// Stop subscription and abort all related tasks
-    pub fn stop(self) {
-        self.stream_handle.abort();
-        if let Some(handle) = self.event_handle {
-            handle.abort();
-        }
-        if let Some(handle) = self.metrics_handle {
-            handle.abort();
-        }
-    }
-
-    /// Whether the stream task has ended, including an error or panic.
     pub fn is_finished(&self) -> bool {
-        self.stream_handle.is_finished()
+        self.task.is_finished()
     }
-
-    /// Asynchronously wait for all tasks to complete
-    pub async fn join(self) -> Result<(), tokio::task::JoinError> {
-        let _ = self.stream_handle.await;
-        if let Some(handle) = self.event_handle {
-            let _ = handle.await;
+    pub async fn shutdown(mut self) -> anyhow::Result<()> {
+        if let Some(shutdown) = self.shutdown.take() {
+            let _ = shutdown.send(());
         }
-        if let Some(handle) = self.metrics_handle {
-            let _ = handle.await;
-        }
-        Ok(())
+        self.task.await?
+    }
+    pub async fn join(self) -> anyhow::Result<()> {
+        self.task.await?
+    }
+    pub fn abort(self) {
+        self.task.abort();
     }
 }

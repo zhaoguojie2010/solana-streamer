@@ -224,7 +224,7 @@ pub struct BonkMigrateToCpswapEvent {
     pub system_program: Pubkey,
     pub rent_program: Pubkey,
     pub metadata_program: Pubkey,
-    pub remaining_accounts: Vec<Pubkey>,
+    pub remaining_account_indices: Vec<u8>,
 }
 
 /// 池状态
@@ -237,7 +237,7 @@ pub struct BonkPoolStateAccountEvent {
     pub owner: Pubkey,
     pub rent_epoch: u64,
     #[serde(skip)]
-    pub raw_account_data: Vec<u8>,
+    pub raw_account_data: bytes::Bytes,
     pub pool_state: PoolState,
 }
 
@@ -251,7 +251,7 @@ pub struct BonkGlobalConfigAccountEvent {
     pub owner: Pubkey,
     pub rent_epoch: u64,
     #[serde(skip)]
-    pub raw_account_data: Vec<u8>,
+    pub raw_account_data: bytes::Bytes,
     pub global_config: GlobalConfig,
 }
 
@@ -265,7 +265,7 @@ pub struct BonkPlatformConfigAccountEvent {
     pub owner: Pubkey,
     pub rent_epoch: u64,
     #[serde(skip)]
-    pub raw_account_data: Vec<u8>,
+    pub raw_account_data: bytes::Bytes,
     pub platform_config: PlatformConfig,
 }
 

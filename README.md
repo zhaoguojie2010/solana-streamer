@@ -87,10 +87,9 @@
 - **Batch Processing Optimization**: Batch processing events to reduce callback overhead
 - **Performance Monitoring**: Built-in performance metrics monitoring, including event processing speed
 - **Memory Optimization**: Move event payloads, share transaction account keys, and borrow CPI instruction buffers to reduce copies and allocations
-- **Flexible Configuration System**: Support for custom batch sizes, backpressure strategies, channel sizes
-- **Preset Configurations**: High-throughput and low-latency preset configurations optimized for different use cases
-- **Backpressure Handling**: Supports blocking and dropping backpressure strategies
-- **Runtime Configuration Updates**: Dynamic configuration parameter updates at runtime
+- **Demand-driven Parsing**: ParsePlan selects outputs and optional work; logging and auditing are disabled by default
+- **Bounded Delivery**: Limits queue count, charged bytes and delivery age with explicit overload errors
+- **Runtime Updates**: Replace complete subscription and parsing plans between messages
 - **Graceful Shutdown**: Support for programmatic stop() method for clean shutdown
 
 ## ⚡ Installation
@@ -118,34 +117,21 @@ solana-streamer-sdk = { path = "./solana-streamer", version = "1.1.5" }
 solana-streamer-sdk = "1.1.5"
 ```
 
+### Optional RPC support
+
+The default build provides gRPC streaming and synchronous parsing without Solana HTTP RPC. Enable `rpc` to adapt responses you already fetched, or `rpc-client` (which includes `rpc`) to query historical transactions:
+
+```toml
+solana-streamer-sdk = { path = "./solana-streamer", features = ["rpc-client"] }
+```
+
+Use `solana_streamer_sdk::rpc::transaction_frame` for adaptation; the caller owns HTTP queries. `cargo build --examples` builds 19 streaming examples by default. Add `--features rpc-client` to build all 20 examples.
+
 ## 🔄 Migration Guide
 
-### Migrating from v0.5.x to v1.x.x
+The current repository introduces an unreleased batch API: separate `TxEvent` / `AccountEvent`, shared metadata in `TxBatch.meta`, borrowed `TxView` callbacks and owned bounded delivery. The old `DexEvent`, `TxDexEvents`, per-event callback and pool APIs have been removed.
 
-Version 1.0.0 introduces a major architectural change from trait-based event handling to enum-based events. This provides better type safety, improved performance, and simpler code patterns.
-
-**Key Changes:**
-
-1. **Event Type Changed** - `Box<dyn UnifiedEvent>` → `DexEvent` enum
-2. **Callback Signature** - Callbacks now receive concrete `DexEvent` instead of trait objects
-3. **Event Matching** - Use standard Rust `match` instead of `match_event!` macro
-4. **Metadata Access** - Event properties now accessed through `.metadata()` method
-
-For detailed migration steps and code examples, see [MIGRATION.md](MIGRATION.md) or [MIGRATION_CN.md](MIGRATION_CN.md) (Chinese version).
-
-**Quick Migration Example:**
-
-```rust
-// Old (v0.5.x)
-let callback = |event: Box<dyn UnifiedEvent>| {
-    println!("Event: {:?}", event.event_type());
-};
-
-// New (v1.x.x)
-let callback = |event: DexEvent| {
-    println!("Event: {:?}", event.metadata().event_type);
-};
-```
+Use a git/path dependency for the current APIs and follow the [migration guide](MIGRATION.md). Refer to the matching documentation when using a published version.
 
 ## ⚙️ Configuration System
 
@@ -181,7 +167,7 @@ See [Running examples](examples/README.md) for building all examples and configu
 | Description | Run Command | Source Path |
 |------|---------|----------|
 | Monitor transaction events using Yellowstone gRPC | `cargo run --example grpc_example` | [examples/grpc_example.rs](examples/grpc_example.rs) |
-| Parse Solana mainnet transaction data | `cargo run --example parse_tx_events` | [examples/parse_tx_events.rs](examples/parse_tx_events.rs) |
+| Parse Solana mainnet transaction data | `cargo run --features rpc-client --example parse_tx_events -- <signature>` | [examples/parse_tx_events.rs](examples/parse_tx_events.rs) |
 | Monitor PancakeSwap V3 swap events (Swap/SwapV2) | `cargo run --example pancakeswap_swap_with_logs` | [examples/pancakeswap_swap_with_logs.rs](examples/pancakeswap_swap_with_logs.rs) |
 | Update filters at runtime | `cargo run --example dynamic_subscription` | [examples/dynamic_subscription.rs](examples/dynamic_subscription.rs) |
 | Monitor specific token account balance changes | `cargo run --example token_balance_listen_example` | [examples/token_balance_listen_example.rs](examples/token_balance_listen_example.rs) |
@@ -189,91 +175,33 @@ See [Running examples](examples/README.md) for building all examples and configu
 | Monitor PumpSwap pool accounts using memcmp filters | `cargo run --example pumpswap_pool_account_listen_example` | [examples/pumpswap_pool_account_listen_example.rs](examples/pumpswap_pool_account_listen_example.rs) |
 | Monitor all associated token accounts for specific mints using memcmp filters | `cargo run --example mint_all_ata_account_listen_example` | [examples/mint_all_ata_account_listen_example.rs](examples/mint_all_ata_account_listen_example.rs) |
 
+For owned async delivery, see [queued_subscription](examples/queued_subscription.rs).
+
 ### Event Filtering
 
-The library supports flexible event filtering to reduce processing overhead and improve performance:
-
-#### Basic Filtering
+`ParsePlan` selects protocols and event types before decoding or allocating events, while retaining dependencies such as developer markers. `None` selects all event types; `Some(&[])` selects none. Log enrichment, CU, raw retention, auditing and classification are explicit `ParseOptions`.
 
 ```rust
-use solana_streamer_sdk::streaming::event_parser::common::{filter::EventTypeFilter, EventType};
-
-// No filtering - receive all events
-let event_type_filter = None;
-
-// Filter specific event types - only receive PumpSwap buy/sell events
-let event_type_filter = Some(EventTypeFilter { 
-    include: vec![EventType::PumpSwapBuy, EventType::PumpSwapSell] 
-});
+use solana_streamer_sdk::streaming::event_parser::{
+    common::EventType, ParseOptions, ParsePlan, Protocol,
+};
+let plan = ParsePlan::new(
+    &[Protocol::PumpFun],
+    Some(&[EventType::PumpFunBuy, EventType::PumpFunSell]),
+    ParseOptions::default(),
+);
 ```
 
-#### Performance Impact
-
-Event filtering can provide significant performance improvements:
-- **60-80% reduction** in unnecessary event processing
-- **Lower memory usage** by filtering out irrelevant events
-- **Reduced network bandwidth** in distributed setups
-- **Better focus** on events that matter to your application
-
-#### Filtering Examples by Use Case
-
-**Trading Bot (Focus on Trade Events)**
-```rust
-let event_type_filter = Some(EventTypeFilter { 
-    include: vec![
-        EventType::PumpSwapBuy,
-        EventType::PumpSwapSell,
-        EventType::PumpFunTrade,
-        EventType::RaydiumCpmmSwap,
-        EventType::RaydiumClmmSwap,
-        EventType::RaydiumAmmV4Swap,
-        ......
-    ] 
-});
-```
-
-**Pool Monitoring (Focus on Liquidity Events)**
-```rust
-let event_type_filter = Some(EventTypeFilter { 
-    include: vec![
-        EventType::PumpSwapCreatePool,
-        EventType::PumpSwapDeposit,
-        EventType::PumpSwapWithdraw,
-        EventType::RaydiumCpmmInitialize,
-        EventType::RaydiumCpmmDeposit,
-        EventType::RaydiumCpmmWithdraw,
-        EventType::RaydiumClmmCreatePool,
-        ......
-    ] 
-});
-```
+Create a `SubscriptionRequest::new(plan)`, set transaction/account wire filters, then call `grpc.subscribe(request, callback).await?`. Accounts are prefiltered by owner/discriminator and decoded explicitly through `AccountView::decode()`.
 
 ## Dynamic Subscription Management
 
-Update subscription filters at runtime without reconnecting to the stream.
-
 ```rust
-// Update filters on existing subscription
-grpc.update_subscription(
-    vec![TransactionFilter {
-        account_include: vec!["new_program_id".to_string()],
-        account_exclude: vec![],
-        account_required: vec![],
-    }],
-    vec![AccountFilter {
-        account: vec![],
-        owner: vec![],
-        filters: vec![],
-    }],
-).await?;
+// A complete request includes its plan and transaction/account/slot filters.
+grpc.update_subscription(new_request).await?;
 ```
 
-- **No Reconnection**: Filter changes apply immediately without closing the stream
-- **Atomic Updates**: Both transaction and account filters updated together
-- **Single Subscription**: One active subscription per client instance
-- **Compatible**: Works with both immediate and advanced subscription methods
-
-Note: Multiple subscription attempts on the same client return an error.
+Each client runs one subscription at a time. The worker replaces the plan between messages and sends its wire request. Success confirms the send, not an exact server-side transaction boundary. See [dynamic_subscription](examples/dynamic_subscription.rs).
 
 ## 🔧 Supported Protocols
 
@@ -290,22 +218,12 @@ Note: Multiple subscription attempts on the same client return an error.
 
 ## 🏗️ Architecture Features
 
-### Unified Event Interface
-
-- **DexEvent Enum**: Type-safe enum containing all protocol events
-- **Protocol Enum**: Easy identification of event sources
-- **Event Factory**: Automatic event parsing and categorization
-
-### Event Parsing System
-
-- **Protocol-specific Parsers**: Dedicated parsers for each supported protocol
-- **Event Factory**: Centralized event creation and parsing
-- **Extensible Design**: Easy to add new protocols and event types
-
-### Streaming Infrastructure
-
-- **Yellowstone gRPC Client**: Optimized for Solana event streaming
-- **Async Processing**: Non-blocking event handling
+- `TxFrame` validates and owns inputs; `InstructionAccounts` projects indices over shared keys.
+- Synchronous `TxParser` reuses worker-local scratch with no global transaction cache.
+- `TxView` borrows batches; `TxBatch` moves ownership; account snapshots use a separate enum.
+- Program Data and CU share one invocation scan; account bytes remain `Bytes` end to end.
+- `subscribe_queued` bounds item count, charged bytes and delivery age with explicit overload errors.
+- `stop().await` waits for production to stop; accepted queue items remain drainable.
 
 ## 📁 Project Structure
 
@@ -323,26 +241,25 @@ src/
 │   │   │   ├── raydium_amm_v4/ # Raydium AMM V4 event parsing
 │   │   │   ├── raydium_cpmm/ # Raydium CPMM event parsing
 │   │   │   └── raydium_clmm/ # Raydium CLMM event parsing
-│   │   └── factory.rs # Parser factory
 │   ├── yellowstone_grpc.rs # Yellowstone gRPC client
 │   └── yellowstone_sub_system.rs # Yellowstone subsystem
 ├── lib.rs            # Main library file
-└── main.rs           # Example program
+└── ../examples/      # Runnable consumers
 ```
 
 ## ⚡ Performance Considerations
 
-See the [performance architecture proposal (中文)](docs/performance-architecture.md) for the planned event model, ownership design, migration phases, and validation criteria.
+The [architecture and validation record](docs/performance-architecture.md) describes the implementation, measurement limits and optional future designs. The [migration guide](MIGRATION.md) explains parsing costs and defaults.
 
-1. **Connection Management**: Properly handle connection lifecycle and reconnection
-2. **Event Filtering**: Use protocol filtering to reduce unnecessary event processing
-3. **Memory Management**: Implement appropriate cleanup for long-running streams
-4. **Error Handling**: Robust error handling for network issues and service interruptions
-5. **Batch Processing Optimization**: Use batch processing to reduce callback overhead and improve throughput
-6. **Performance Monitoring**: Enable performance monitoring to identify bottlenecks and optimization opportunities
-7. **Graceful Shutdown**: Use the stop() method for clean shutdown and implement signal handlers for proper resource cleanup
+On the measured target, transaction events shrink from 11,744 B to 1,136 B and per-event metadata from 312 B to 80 B. Tests cover allocation-free warmed borrowed paths and early filtering. Layout reductions do not imply the same production throughput improvement.
 
----
+Use `subscribe` for fast synchronous callbacks and [queued_subscription](examples/queued_subscription.rs) for database/network consumers. Defaults are 256 queued items, 64 MiB of charged payload and a 5-second maximum delivery age. Overload stops the subscription with an error. The byte budget is not an RSS limit.
+
+```bash
+cargo test
+cargo build --examples
+cargo bench --bench parser_replay
+```
 
 ## 📄 License
 

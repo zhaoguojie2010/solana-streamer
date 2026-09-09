@@ -1,10 +1,11 @@
+use crate::streaming::event_parser::InstructionAccounts;
 use crate::streaming::event_parser::{
     common::{read_u128_le, read_u64_le, read_u8_le, EventMetadata, EventType, ProgramDataItem},
     protocols::whirlpool::{
         discriminators, WhirlpoolExecutionEvent, WhirlpoolInstructionEvent,
         WhirlpoolInstructionKind, WhirlpoolSwapEvent, WhirlpoolSwapV2Event,
     },
-    DexEvent,
+    TxEvent,
 };
 use solana_sdk::pubkey::Pubkey;
 
@@ -31,9 +32,9 @@ pub struct TradedEventLogData {
 pub fn parse_whirlpool_instruction_data(
     discriminator: &[u8],
     data: &[u8],
-    accounts: &[Pubkey],
+    accounts: InstructionAccounts<'_>,
     metadata: EventMetadata,
-) -> Option<DexEvent> {
+) -> Option<TxEvent> {
     match discriminator {
         discriminators::SWAP => parse_swap_instruction(data, accounts, metadata),
         discriminators::SWAP_V2 => parse_swap_v2_instruction(data, accounts, metadata),
@@ -43,10 +44,10 @@ pub fn parse_whirlpool_instruction_data(
 
 fn parse_modeled_instruction(
     discriminator: &[u8],
-    data: &[u8],
-    accounts: &[Pubkey],
+    _data: &[u8],
+    _accounts: InstructionAccounts<'_>,
     mut metadata: EventMetadata,
-) -> Option<DexEvent> {
+) -> Option<TxEvent> {
     let disc: [u8; 8] = discriminator.try_into().ok()?;
     use WhirlpoolInstructionKind as K;
     let kind = match disc {
@@ -80,11 +81,9 @@ fn parse_modeled_instruction(
         other => K::Other(other),
     };
     metadata.event_type = EventType::WhirlpoolInstruction;
-    Some(DexEvent::WhirlpoolInstructionEvent(WhirlpoolInstructionEvent {
+    Some(TxEvent::WhirlpoolInstructionEvent(WhirlpoolInstructionEvent {
         metadata,
         kind,
-        accounts: accounts.to_vec(),
-        data: data.to_vec(),
         execution_events: Vec::new(),
     }))
 }
@@ -92,11 +91,10 @@ fn parse_modeled_instruction(
 pub fn parse_execution_event_from_program_data(
     item: &ProgramDataItem,
 ) -> Option<WhirlpoolExecutionEvent> {
-    use base64::{engine::general_purpose::STANDARD, Engine};
     if item.program_id != WHIRLPOOL_PROGRAM_ID {
         return None;
     }
-    let bytes = STANDARD.decode(&item.base64).ok()?;
+    let bytes = item.data;
     let disc = bytes.get(..8)?;
     let data = bytes.get(8..)?;
     let key = |o| Pubkey::try_from(data.get(o..o + 32)?).ok();
@@ -147,7 +145,7 @@ pub fn parse_execution_event_from_program_data(
             })
         }
         discriminators::TRADED_EVENT => {
-            let traded = parse_traded_event_from_log(&item.base64)?;
+            let traded = parse_traded_event_from_bytes(item.data)?;
             Some(WhirlpoolExecutionEvent::Traded {
                 whirlpool: traded.whirlpool,
                 a_to_b: traded.a_to_b,
@@ -174,7 +172,7 @@ pub fn parse_whirlpool_inner_instruction_data(
     _discriminator: &[u8],
     _data: &[u8],
     _metadata: EventMetadata,
-) -> Option<DexEvent> {
+) -> Option<TxEvent> {
     None
 }
 
@@ -183,9 +181,9 @@ pub fn parse_whirlpool_inner_instruction_data(
 /// 根据判别器路由到具体的账户解析函数
 pub fn parse_whirlpool_account_data(
     discriminator: &[u8],
-    account: crate::streaming::grpc::AccountPretty,
+    account: crate::streaming::grpc::AccountFrame,
     metadata: crate::streaming::event_parser::common::EventMetadata,
-) -> Option<crate::streaming::event_parser::DexEvent> {
+) -> Option<crate::streaming::event_parser::AccountEvent> {
     match discriminator {
         discriminators::WHIRLPOOL => {
             crate::streaming::event_parser::protocols::whirlpool::types::whirlpool_parser(
@@ -203,72 +201,72 @@ pub fn parse_whirlpool_account_data(
 
 fn parse_swap_instruction(
     data: &[u8],
-    accounts: &[Pubkey],
+    accounts: InstructionAccounts<'_>,
     mut metadata: EventMetadata,
-) -> Option<DexEvent> {
+) -> Option<TxEvent> {
     metadata.event_type = EventType::WhirlpoolSwap;
 
     if data.len() < 34 || accounts.len() < 11 {
         return None;
     }
 
-    Some(DexEvent::WhirlpoolSwapEvent(WhirlpoolSwapEvent {
+    Some(TxEvent::WhirlpoolSwapEvent(WhirlpoolSwapEvent {
         metadata,
         amount: read_u64_le(data, 0)?,
         other_amount_threshold: read_u64_le(data, 8)?,
         sqrt_price_limit: read_u128_le(data, 16)?,
         amount_specified_is_input: read_u8_le(data, 32)? != 0,
         a_to_b: read_u8_le(data, 33)? != 0,
-        token_program: accounts[0],
-        token_authority: accounts[1],
-        whirlpool: accounts[2],
-        token_owner_account_a: accounts[3],
-        token_vault_a: accounts[4],
-        token_owner_account_b: accounts[5],
-        token_vault_b: accounts[6],
-        tick_array_0: accounts[7],
-        tick_array_1: accounts[8],
-        tick_array_2: accounts[9],
-        oracle: accounts[10],
-        remaining_accounts: accounts[11..].to_vec(),
+        token_program: *accounts.get(0)?,
+        token_authority: *accounts.get(1)?,
+        whirlpool: *accounts.get(2)?,
+        token_owner_account_a: *accounts.get(3)?,
+        token_vault_a: *accounts.get(4)?,
+        token_owner_account_b: *accounts.get(5)?,
+        token_vault_b: *accounts.get(6)?,
+        tick_array_0: *accounts.get(7)?,
+        tick_array_1: *accounts.get(8)?,
+        tick_array_2: *accounts.get(9)?,
+        oracle: *accounts.get(10)?,
+        remaining_account_indices: accounts.indices_from(11).collect(),
         ..Default::default()
     }))
 }
 
 fn parse_swap_v2_instruction(
     data: &[u8],
-    accounts: &[Pubkey],
+    accounts: InstructionAccounts<'_>,
     mut metadata: EventMetadata,
-) -> Option<DexEvent> {
+) -> Option<TxEvent> {
     metadata.event_type = EventType::WhirlpoolSwapV2;
 
     if data.len() < 34 || accounts.len() < 15 {
         return None;
     }
 
-    Some(DexEvent::WhirlpoolSwapV2Event(WhirlpoolSwapV2Event {
+    Some(TxEvent::WhirlpoolSwapV2Event(WhirlpoolSwapV2Event {
         metadata,
         amount: read_u64_le(data, 0)?,
         other_amount_threshold: read_u64_le(data, 8)?,
         sqrt_price_limit: read_u128_le(data, 16)?,
         amount_specified_is_input: read_u8_le(data, 32)? != 0,
         a_to_b: read_u8_le(data, 33)? != 0,
-        token_program_a: accounts[0],
-        token_program_b: accounts[1],
-        memo_program: accounts[2],
-        token_authority: accounts[3],
-        whirlpool: accounts[4],
-        token_mint_a: accounts[5],
-        token_mint_b: accounts[6],
-        token_owner_account_a: accounts[7],
-        token_vault_a: accounts[8],
-        token_owner_account_b: accounts[9],
-        token_vault_b: accounts[10],
-        tick_array_0: accounts[11],
-        tick_array_1: accounts[12],
-        tick_array_2: accounts[13],
-        oracle: accounts[14],
-        remaining_accounts: accounts[15..].to_vec(),
+        token_program_a: *accounts.get(0)?,
+        token_program_b: *accounts.get(1)?,
+        memo_program: *accounts.get(2)?,
+        token_authority: *accounts.get(3)?,
+        whirlpool: *accounts.get(4)?,
+        token_mint_a: *accounts.get(5)?,
+        token_mint_b: *accounts.get(6)?,
+        token_owner_account_a: *accounts.get(7)?,
+        token_vault_a: *accounts.get(8)?,
+        token_owner_account_b: *accounts.get(9)?,
+        token_vault_b: *accounts.get(10)?,
+        tick_array_0: *accounts.get(11)?,
+        tick_array_1: *accounts.get(12)?,
+        tick_array_2: *accounts.get(13)?,
+        oracle: *accounts.get(14)?,
+        remaining_account_indices: accounts.indices_from(15).collect(),
         ..Default::default()
     }))
 }
@@ -277,10 +275,7 @@ fn parse_swap_v2_instruction(
 ///
 /// 日志格式: "Program data: <base64>"
 /// 编码格式: [8字节事件鉴别器][borsh(Traded)]
-pub fn parse_traded_event_from_log(log_data_base64: &str) -> Option<TradedEventLogData> {
-    use base64::{engine::general_purpose::STANDARD, Engine};
-
-    let decoded = STANDARD.decode(log_data_base64).ok()?;
+pub fn parse_traded_event_from_bytes(decoded: &[u8]) -> Option<TradedEventLogData> {
     if decoded.len() < 8 {
         return None;
     }
@@ -331,9 +326,27 @@ pub fn parse_traded_event_from_program_data(
     if item.program_id != WHIRLPOOL_PROGRAM_ID {
         return None;
     }
-    let event_data = parse_traded_event_from_log(&item.base64)?;
+    let event_data = parse_traded_event_from_bytes(item.data)?;
     if &event_data.whirlpool != expected_whirlpool {
         return None;
     }
     Some(event_data)
+}
+
+/// Classify before allocating or decoding a protocol instruction.
+pub(crate) fn instruction_event_type(discriminator: &[u8]) -> Option<EventType> {
+    match discriminator {
+        discriminators::SWAP => Some(EventType::WhirlpoolSwap),
+        discriminators::SWAP_V2 => Some(EventType::WhirlpoolSwapV2),
+        _ => Some(EventType::WhirlpoolInstruction),
+    }
+}
+
+/// Classify before allocating or decoding a protocol account.
+pub(crate) fn account_event_type(discriminator: &[u8]) -> Option<EventType> {
+    match discriminator {
+        discriminators::WHIRLPOOL => Some(EventType::AccountWhirlpool),
+        discriminators::TICK_ARRAY => Some(EventType::AccountWhirlpoolTickArray),
+        _ => None,
+    }
 }

@@ -1,9 +1,13 @@
+use solana_streamer_sdk::streaming::{
+    event_parser::{ParseOptions, ParsePlan},
+    yellowstone_grpc::{StreamEvent, SubscriptionRequest},
+};
 mod common;
 
 use solana_streamer_sdk::streaming::{
-    event_parser::{protocols::whirlpool::parser::WHIRLPOOL_PROGRAM_ID, DexEvent, Protocol},
+    event_parser::{protocols::whirlpool::parser::WHIRLPOOL_PROGRAM_ID, AccountEvent, Protocol},
     grpc::ClientConfig,
-    yellowstone_grpc::{AccountFilter, TransactionFilter},
+    yellowstone_grpc::AccountFilter,
     YellowstoneGrpc,
 };
 
@@ -38,12 +42,6 @@ async fn subscribe_whirlpool_tick_array_accounts() -> Result<(), Box<dyn std::er
         cuckoo_accounts_filter: None,
     };
 
-    let transaction_filter = TransactionFilter {
-        account_include: vec![WHIRLPOOL_PROGRAM_ID.to_string()],
-        account_exclude: vec![],
-        account_required: vec![],
-    };
-
     use solana_streamer_sdk::streaming::event_parser::common::filter::EventTypeFilter;
     use solana_streamer_sdk::streaming::event_parser::common::EventType;
     let event_type_filter =
@@ -52,37 +50,49 @@ async fn subscribe_whirlpool_tick_array_accounts() -> Result<(), Box<dyn std::er
     println!("开始监听事件，按 Ctrl+C 停止...");
     println!("监控程序: {}", WHIRLPOOL_PROGRAM_ID);
 
-    grpc.subscribe_events_immediate(
-        protocols,
-        None,
-        vec![transaction_filter],
-        vec![account_filter],
-        event_type_filter,
-        None,
-        callback,
-    )
-    .await?;
+    let plan = ParsePlan::new(
+        &protocols,
+        event_type_filter.as_ref().map(
+            |f: &solana_streamer_sdk::streaming::event_parser::common::filter::EventTypeFilter| {
+                f.include.as_slice()
+            },
+        ),
+        ParseOptions::default(),
+    );
+    let mut request = SubscriptionRequest::new(plan);
+    request.transactions = Vec::new();
+    request.accounts = vec![account_filter];
+    grpc.subscribe(request, callback).await?;
 
     println!("等待 Ctrl+C 停止...");
     let shutdown = common::wait_for_shutdown(&grpc.subscription_handle).await;
-    grpc.stop().await;
+    let stopped = grpc.stop().await;
     shutdown?;
+    stopped?;
 
     Ok(())
 }
 
-fn create_event_callback() -> impl Fn(DexEvent) {
-    |event: DexEvent| match event {
-        DexEvent::WhirlpoolTickArrayAccountEvent(e) => {
-            let initialized_ticks =
-                e.tick_array.ticks.iter().filter(|tick| tick.initialized).count();
-            println!("=== Whirlpool TickArray 账户更新 ===");
-            println!("账户地址: {}", e.pubkey);
-            println!("Whirlpool: {}", e.tick_array.whirlpool);
-            println!("Start Tick Index: {}", e.tick_array.start_tick_index);
-            println!("Initialized Ticks: {}", initialized_ticks);
-            println!("=====================================");
+fn create_event_callback() -> impl for<'a> FnMut(StreamEvent<'a>) {
+    |stream| {
+        let StreamEvent::Account(view) = stream else {
+            return;
+        };
+        let Some(event) = view.decode() else {
+            return;
+        };
+        match event {
+            AccountEvent::WhirlpoolTickArrayAccountEvent(e) => {
+                let initialized_ticks =
+                    e.tick_array.ticks.iter().filter(|tick| tick.initialized).count();
+                println!("=== Whirlpool TickArray 账户更新 ===");
+                println!("账户地址: {}", e.pubkey);
+                println!("Whirlpool: {}", e.tick_array.whirlpool);
+                println!("Start Tick Index: {}", e.tick_array.start_tick_index);
+                println!("Initialized Ticks: {}", initialized_ticks);
+                println!("=====================================");
+            }
+            _ => {}
         }
-        _ => {}
     }
 }

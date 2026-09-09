@@ -1,3 +1,4 @@
+use crate::streaming::event_parser::InstructionAccounts;
 use solana_sdk::pubkey::Pubkey;
 
 use crate::streaming::event_parser::{
@@ -6,7 +7,7 @@ use crate::streaming::event_parser::{
         discriminators, RaydiumCpmmDepositEvent, RaydiumCpmmInitializeEvent, RaydiumCpmmSwapEvent,
         RaydiumCpmmWithdrawEvent,
     },
-    DexEvent,
+    TxEvent,
 };
 
 /// Raydium CPMM程序ID
@@ -35,9 +36,9 @@ pub struct SwapEventLogData {
 pub fn parse_raydium_cpmm_instruction_data(
     discriminator: &[u8],
     data: &[u8],
-    accounts: &[Pubkey],
+    accounts: InstructionAccounts<'_>,
     metadata: EventMetadata,
-) -> Option<DexEvent> {
+) -> Option<TxEvent> {
     match discriminator {
         discriminators::SWAP_BASE_IN => parse_swap_base_input_instruction(data, accounts, metadata),
         discriminators::SWAP_BASE_OUT => {
@@ -64,7 +65,7 @@ pub fn parse_raydium_cpmm_inner_instruction_data(
     _discriminator: &[u8],
     _data: &[u8],
     _metadata: EventMetadata,
-) -> Option<DexEvent> {
+) -> Option<TxEvent> {
     None
 }
 
@@ -73,9 +74,9 @@ pub fn parse_raydium_cpmm_inner_instruction_data(
 /// 根据判别器路由到具体的账户解析函数
 pub fn parse_raydium_cpmm_account_data(
     discriminator: &[u8],
-    account: crate::streaming::grpc::AccountPretty,
+    account: crate::streaming::grpc::AccountFrame,
     metadata: crate::streaming::event_parser::common::EventMetadata,
-) -> Option<crate::streaming::event_parser::DexEvent> {
+) -> Option<crate::streaming::event_parser::AccountEvent> {
     match discriminator {
         discriminators::AMM_CONFIG => {
             crate::streaming::event_parser::protocols::raydium_cpmm::types::amm_config_parser(
@@ -94,77 +95,77 @@ pub fn parse_raydium_cpmm_account_data(
 /// 解析提款指令事件
 fn parse_withdraw_instruction(
     data: &[u8],
-    accounts: &[Pubkey],
+    accounts: InstructionAccounts<'_>,
     mut metadata: EventMetadata,
-) -> Option<DexEvent> {
+) -> Option<TxEvent> {
     metadata.event_type = EventType::RaydiumCpmmWithdraw;
 
     if data.len() < 24 || accounts.len() < 14 {
         return None;
     }
-    Some(DexEvent::RaydiumCpmmWithdrawEvent(RaydiumCpmmWithdrawEvent {
+    Some(TxEvent::RaydiumCpmmWithdrawEvent(RaydiumCpmmWithdrawEvent {
         liquidity_state: None,
         metadata,
         lp_token_amount: read_u64_le(data, 0)?,
         minimum_token0_amount: read_u64_le(data, 8)?,
         minimum_token1_amount: read_u64_le(data, 16)?,
-        owner: accounts[0],
-        authority: accounts[1],
-        pool_state: accounts[2],
-        owner_lp_token: accounts[3],
-        token0_account: accounts[4],
-        token1_account: accounts[5],
-        token0_vault: accounts[6],
-        token1_vault: accounts[7],
-        token_program: accounts[8],
-        token_program2022: accounts[9],
-        vault0_mint: accounts[10],
-        vault1_mint: accounts[11],
-        lp_mint: accounts[12],
-        memo_program: accounts[13],
+        owner: *accounts.get(0)?,
+        authority: *accounts.get(1)?,
+        pool_state: *accounts.get(2)?,
+        owner_lp_token: *accounts.get(3)?,
+        token0_account: *accounts.get(4)?,
+        token1_account: *accounts.get(5)?,
+        token0_vault: *accounts.get(6)?,
+        token1_vault: *accounts.get(7)?,
+        token_program: *accounts.get(8)?,
+        token_program2022: *accounts.get(9)?,
+        vault0_mint: *accounts.get(10)?,
+        vault1_mint: *accounts.get(11)?,
+        lp_mint: *accounts.get(12)?,
+        memo_program: *accounts.get(13)?,
     }))
 }
 
 /// 解析初始化指令事件
 fn parse_initialize_instruction(
     data: &[u8],
-    accounts: &[Pubkey],
+    accounts: InstructionAccounts<'_>,
     mut metadata: EventMetadata,
-) -> Option<DexEvent> {
+) -> Option<TxEvent> {
     metadata.event_type = EventType::RaydiumCpmmInitialize;
 
     if data.len() < 24 || accounts.len() < 20 {
         return None;
     }
-    Some(DexEvent::RaydiumCpmmInitializeEvent(RaydiumCpmmInitializeEvent {
+    Some(TxEvent::RaydiumCpmmInitializeEvent(RaydiumCpmmInitializeEvent {
         metadata,
         init_amount0: read_u64_le(data, 0)?,
         init_amount1: read_u64_le(data, 8)?,
         open_time: read_u64_le(data, 16)?,
         creator_fee_on: 0,
         enable_creator_fee: false,
-        payer: accounts[0],
-        creator: accounts[0],
-        amm_config: accounts[1],
-        authority: accounts[2],
-        pool_state: accounts[3],
-        token0_mint: accounts[4],
-        token1_mint: accounts[5],
-        lp_mint: accounts[6],
-        creator_token0: accounts[7],
-        creator_token1: accounts[8],
-        creator_lp_token: accounts[9],
-        token0_vault: accounts[10],
-        token1_vault: accounts[11],
-        create_pool_fee: accounts[12],
-        observation_state: accounts[13],
+        payer: *accounts.get(0)?,
+        creator: *accounts.get(0)?,
+        amm_config: *accounts.get(1)?,
+        authority: *accounts.get(2)?,
+        pool_state: *accounts.get(3)?,
+        token0_mint: *accounts.get(4)?,
+        token1_mint: *accounts.get(5)?,
+        lp_mint: *accounts.get(6)?,
+        creator_token0: *accounts.get(7)?,
+        creator_token1: *accounts.get(8)?,
+        creator_lp_token: *accounts.get(9)?,
+        token0_vault: *accounts.get(10)?,
+        token1_vault: *accounts.get(11)?,
+        create_pool_fee: *accounts.get(12)?,
+        observation_state: *accounts.get(13)?,
         permission: Pubkey::default(),
-        token_program: accounts[14],
-        token0_program: accounts[15],
-        token1_program: accounts[16],
-        associated_token_program: accounts[17],
-        system_program: accounts[18],
-        rent: accounts[19],
+        token_program: *accounts.get(14)?,
+        token0_program: *accounts.get(15)?,
+        token1_program: *accounts.get(16)?,
+        associated_token_program: *accounts.get(17)?,
+        system_program: *accounts.get(18)?,
+        rent: *accounts.get(19)?,
     }))
 }
 
@@ -172,9 +173,9 @@ fn parse_initialize_instruction(
 /// because payer and pool creator are separate and the permission PDA is explicit.
 fn parse_initialize_with_permission_instruction(
     data: &[u8],
-    accounts: &[Pubkey],
+    accounts: InstructionAccounts<'_>,
     mut metadata: EventMetadata,
-) -> Option<DexEvent> {
+) -> Option<TxEvent> {
     metadata.event_type = EventType::RaydiumCpmmInitializeWithPermission;
 
     if data.len() < 25 || accounts.len() < 21 {
@@ -184,34 +185,34 @@ fn parse_initialize_with_permission_instruction(
     if creator_fee_on > 2 {
         return None;
     }
-    Some(DexEvent::RaydiumCpmmInitializeEvent(RaydiumCpmmInitializeEvent {
+    Some(TxEvent::RaydiumCpmmInitializeEvent(RaydiumCpmmInitializeEvent {
         metadata,
         init_amount0: read_u64_le(data, 0)?,
         init_amount1: read_u64_le(data, 8)?,
         open_time: read_u64_le(data, 16)?,
         creator_fee_on,
         enable_creator_fee: true,
-        payer: accounts[0],
-        creator: accounts[1],
-        amm_config: accounts[2],
-        authority: accounts[3],
-        pool_state: accounts[4],
-        token0_mint: accounts[5],
-        token1_mint: accounts[6],
-        lp_mint: accounts[7],
-        creator_token0: accounts[8],
-        creator_token1: accounts[9],
-        creator_lp_token: accounts[10],
-        token0_vault: accounts[11],
-        token1_vault: accounts[12],
-        create_pool_fee: accounts[13],
-        observation_state: accounts[14],
-        permission: accounts[15],
-        token_program: accounts[16],
-        token0_program: accounts[17],
-        token1_program: accounts[18],
-        associated_token_program: accounts[19],
-        system_program: accounts[20],
+        payer: *accounts.get(0)?,
+        creator: *accounts.get(1)?,
+        amm_config: *accounts.get(2)?,
+        authority: *accounts.get(3)?,
+        pool_state: *accounts.get(4)?,
+        token0_mint: *accounts.get(5)?,
+        token1_mint: *accounts.get(6)?,
+        lp_mint: *accounts.get(7)?,
+        creator_token0: *accounts.get(8)?,
+        creator_token1: *accounts.get(9)?,
+        creator_lp_token: *accounts.get(10)?,
+        token0_vault: *accounts.get(11)?,
+        token1_vault: *accounts.get(12)?,
+        create_pool_fee: *accounts.get(13)?,
+        observation_state: *accounts.get(14)?,
+        permission: *accounts.get(15)?,
+        token_program: *accounts.get(16)?,
+        token0_program: *accounts.get(17)?,
+        token1_program: *accounts.get(18)?,
+        associated_token_program: *accounts.get(19)?,
+        system_program: *accounts.get(20)?,
         rent: Pubkey::default(),
     }))
 }
@@ -219,42 +220,42 @@ fn parse_initialize_with_permission_instruction(
 /// 解析存款指令事件
 fn parse_deposit_instruction(
     data: &[u8],
-    accounts: &[Pubkey],
+    accounts: InstructionAccounts<'_>,
     mut metadata: EventMetadata,
-) -> Option<DexEvent> {
+) -> Option<TxEvent> {
     metadata.event_type = EventType::RaydiumCpmmDeposit;
 
     if data.len() < 24 || accounts.len() < 13 {
         return None;
     }
-    Some(DexEvent::RaydiumCpmmDepositEvent(RaydiumCpmmDepositEvent {
+    Some(TxEvent::RaydiumCpmmDepositEvent(RaydiumCpmmDepositEvent {
         liquidity_state: None,
         metadata,
         lp_token_amount: read_u64_le(data, 0)?,
         maximum_token0_amount: read_u64_le(data, 8)?,
         maximum_token1_amount: read_u64_le(data, 16)?,
-        owner: accounts[0],
-        authority: accounts[1],
-        pool_state: accounts[2],
-        owner_lp_token: accounts[3],
-        token0_account: accounts[4],
-        token1_account: accounts[5],
-        token0_vault: accounts[6],
-        token1_vault: accounts[7],
-        token_program: accounts[8],
-        token_program2022: accounts[9],
-        vault0_mint: accounts[10],
-        vault1_mint: accounts[11],
-        lp_mint: accounts[12],
+        owner: *accounts.get(0)?,
+        authority: *accounts.get(1)?,
+        pool_state: *accounts.get(2)?,
+        owner_lp_token: *accounts.get(3)?,
+        token0_account: *accounts.get(4)?,
+        token1_account: *accounts.get(5)?,
+        token0_vault: *accounts.get(6)?,
+        token1_vault: *accounts.get(7)?,
+        token_program: *accounts.get(8)?,
+        token_program2022: *accounts.get(9)?,
+        vault0_mint: *accounts.get(10)?,
+        vault1_mint: *accounts.get(11)?,
+        lp_mint: *accounts.get(12)?,
     }))
 }
 
 /// 解析买入指令事件
 fn parse_swap_base_input_instruction(
     data: &[u8],
-    accounts: &[Pubkey],
+    accounts: InstructionAccounts<'_>,
     mut metadata: EventMetadata,
-) -> Option<DexEvent> {
+) -> Option<TxEvent> {
     metadata.event_type = EventType::RaydiumCpmmSwapBaseInput;
 
     if data.len() < 16 || accounts.len() < 13 {
@@ -264,32 +265,32 @@ fn parse_swap_base_input_instruction(
     let amount_in = read_u64_le(data, 0)?;
     let minimum_amount_out = read_u64_le(data, 8)?;
 
-    Some(DexEvent::RaydiumCpmmSwapEvent(RaydiumCpmmSwapEvent {
+    Some(TxEvent::RaydiumCpmmSwapEvent(RaydiumCpmmSwapEvent {
         metadata,
         amount_in,
         minimum_amount_out,
-        payer: accounts[0],
-        authority: accounts[1],
-        amm_config: accounts[2],
-        pool_state: accounts[3],
-        input_token_account: accounts[4],
-        output_token_account: accounts[5],
-        input_vault: accounts[6],
-        output_vault: accounts[7],
-        input_token_program: accounts[8],
-        output_token_program: accounts[9],
-        input_token_mint: accounts[10],
-        output_token_mint: accounts[11],
-        observation_state: accounts[12],
+        payer: *accounts.get(0)?,
+        authority: *accounts.get(1)?,
+        amm_config: *accounts.get(2)?,
+        pool_state: *accounts.get(3)?,
+        input_token_account: *accounts.get(4)?,
+        output_token_account: *accounts.get(5)?,
+        input_vault: *accounts.get(6)?,
+        output_vault: *accounts.get(7)?,
+        input_token_program: *accounts.get(8)?,
+        output_token_program: *accounts.get(9)?,
+        input_token_mint: *accounts.get(10)?,
+        output_token_mint: *accounts.get(11)?,
+        observation_state: *accounts.get(12)?,
         ..Default::default()
     }))
 }
 
 fn parse_swap_base_output_instruction(
     data: &[u8],
-    accounts: &[Pubkey],
+    accounts: InstructionAccounts<'_>,
     mut metadata: EventMetadata,
-) -> Option<DexEvent> {
+) -> Option<TxEvent> {
     metadata.event_type = EventType::RaydiumCpmmSwapBaseOutput;
 
     if data.len() < 16 || accounts.len() < 13 {
@@ -299,23 +300,23 @@ fn parse_swap_base_output_instruction(
     let max_amount_in = read_u64_le(data, 0)?;
     let amount_out = read_u64_le(data, 8)?;
 
-    Some(DexEvent::RaydiumCpmmSwapEvent(RaydiumCpmmSwapEvent {
+    Some(TxEvent::RaydiumCpmmSwapEvent(RaydiumCpmmSwapEvent {
         metadata,
         max_amount_in,
         amount_out,
-        payer: accounts[0],
-        authority: accounts[1],
-        amm_config: accounts[2],
-        pool_state: accounts[3],
-        input_token_account: accounts[4],
-        output_token_account: accounts[5],
-        input_vault: accounts[6],
-        output_vault: accounts[7],
-        input_token_program: accounts[8],
-        output_token_program: accounts[9],
-        input_token_mint: accounts[10],
-        output_token_mint: accounts[11],
-        observation_state: accounts[12],
+        payer: *accounts.get(0)?,
+        authority: *accounts.get(1)?,
+        amm_config: *accounts.get(2)?,
+        pool_state: *accounts.get(3)?,
+        input_token_account: *accounts.get(4)?,
+        output_token_account: *accounts.get(5)?,
+        input_vault: *accounts.get(6)?,
+        output_vault: *accounts.get(7)?,
+        input_token_program: *accounts.get(8)?,
+        output_token_program: *accounts.get(9)?,
+        input_token_mint: *accounts.get(10)?,
+        output_token_mint: *accounts.get(11)?,
+        observation_state: *accounts.get(12)?,
         ..Default::default()
     }))
 }
@@ -324,10 +325,8 @@ fn parse_swap_base_output_instruction(
 ///
 /// Anchor 事件日志格式: "Program data: <base64_encoded_event>"
 /// 事件数据格式: [8字节鉴别器] [事件数据]
-pub fn parse_swap_event_from_log(log_data_base64: &str) -> Option<SwapEventLogData> {
+pub fn parse_swap_event_from_bytes(decoded: &[u8]) -> Option<SwapEventLogData> {
     // 解码 base64
-    use base64::{engine::general_purpose::STANDARD, Engine};
-    let decoded = STANDARD.decode(log_data_base64).ok()?;
 
     // 检查长度和鉴别器
     if decoded.len() < 8 {
@@ -413,7 +412,7 @@ pub fn parse_swap_event_from_program_data(
     if item.program_id != RAYDIUM_CPMM_PROGRAM_ID {
         return None;
     }
-    let event_data = parse_swap_event_from_log(&item.base64)?;
+    let event_data = parse_swap_event_from_bytes(item.data)?;
     if &event_data.pool_id != expected_pool_id {
         return None;
     }
@@ -422,14 +421,21 @@ pub fn parse_swap_event_from_program_data(
 
 /// Decode only the complete, program-authenticated LpChangeEvent layout.
 pub fn parse_liquidity_state_from_program_data(
-    item: &ProgramDataItem, pool: Pubkey, change_type: u8,
+    item: &ProgramDataItem,
+    pool: Pubkey,
+    change_type: u8,
 ) -> Option<super::events::RaydiumCpmmLiquidityState> {
-    use base64::Engine;
-    if item.program_id != RAYDIUM_CPMM_PROGRAM_ID { return None; }
-    let bytes = base64::engine::general_purpose::STANDARD.decode(&item.base64).ok()?;
-    if bytes.len() != 97 || bytes.get(..8)? != [121, 163, 205, 201, 57, 218, 117, 60]
+    if item.program_id != RAYDIUM_CPMM_PROGRAM_ID {
+        return None;
+    }
+    let bytes = item.data;
+    if bytes.len() != 97
+        || bytes.get(..8)? != [121, 163, 205, 201, 57, 218, 117, 60]
         || Pubkey::new_from_array(bytes.get(8..40)?.try_into().ok()?) != pool
-        || *bytes.get(96)? != change_type { return None; }
+        || *bytes.get(96)? != change_type
+    {
+        return None;
+    }
     Some(super::events::RaydiumCpmmLiquidityState {
         lp_amount_before: read_u64_le(&bytes, 40)?,
         token_0_vault_before: read_u64_le(&bytes, 48)?,
@@ -440,4 +446,28 @@ pub fn parse_liquidity_state_from_program_data(
         token_1_transfer_fee: read_u64_le(&bytes, 88)?,
         change_type,
     })
+}
+
+/// Classify before allocating or decoding a protocol instruction.
+pub(crate) fn instruction_event_type(discriminator: &[u8]) -> Option<EventType> {
+    match discriminator {
+        discriminators::SWAP_BASE_IN => Some(EventType::RaydiumCpmmSwapBaseInput),
+        discriminators::SWAP_BASE_OUT => Some(EventType::RaydiumCpmmSwapBaseOutput),
+        discriminators::DEPOSIT => Some(EventType::RaydiumCpmmDeposit),
+        discriminators::INITIALIZE => Some(EventType::RaydiumCpmmInitialize),
+        discriminators::INITIALIZE_WITH_PERMISSION => {
+            Some(EventType::RaydiumCpmmInitializeWithPermission)
+        }
+        discriminators::WITHDRAW => Some(EventType::RaydiumCpmmWithdraw),
+        _ => None,
+    }
+}
+
+/// Classify before allocating or decoding a protocol account.
+pub(crate) fn account_event_type(discriminator: &[u8]) -> Option<EventType> {
+    match discriminator {
+        discriminators::AMM_CONFIG => Some(EventType::AccountRaydiumCpmmAmmConfig),
+        discriminators::POOL_STATE => Some(EventType::AccountRaydiumCpmmPoolState),
+        _ => None,
+    }
 }

@@ -1,13 +1,17 @@
+use solana_streamer_sdk::streaming::{
+    event_parser::{ParseOptions, ParsePlan},
+    yellowstone_grpc::{StreamEvent, SubscriptionRequest},
+};
 mod common;
 
 use solana_streamer_sdk::streaming::{
     event_parser::{
         common::{filter::EventTypeFilter, EventType},
         protocols::meteora_dlmm::{events::discriminators, parser::METEORA_DLMM_PROGRAM_ID},
-        DexEvent, Protocol,
+        AccountEvent, Protocol,
     },
     grpc::ClientConfig,
-    yellowstone_grpc::{AccountFilter, TransactionFilter},
+    yellowstone_grpc::AccountFilter,
     YellowstoneGrpc,
 };
 use yellowstone_grpc_proto::geyser::{
@@ -60,11 +64,6 @@ async fn subscribe_meteora_dlmm_bin_array_accounts() -> Result<(), Box<dyn std::
     };
 
     // 交易过滤器（可选，如果只想订阅账户数据，可以留空）
-    let transaction_filter = TransactionFilter {
-        account_include: vec![METEORA_DLMM_PROGRAM_ID.to_string()],
-        account_exclude: vec![],
-        account_required: vec![],
-    };
 
     // 事件类型过滤器 - 只订阅 BinArray 账户事件
     let event_type_filter =
@@ -75,64 +74,78 @@ async fn subscribe_meteora_dlmm_bin_array_accounts() -> Result<(), Box<dyn std::
 
     println!("开始订阅...");
 
-    grpc.subscribe_events_immediate(
-        protocols,
-        None,
-        vec![transaction_filter],
-        vec![account_filter],
-        event_type_filter,
-        None,
-        callback,
-    )
-    .await?;
+    let plan = ParsePlan::new(
+        &protocols,
+        event_type_filter.as_ref().map(
+            |f: &solana_streamer_sdk::streaming::event_parser::common::filter::EventTypeFilter| {
+                f.include.as_slice()
+            },
+        ),
+        ParseOptions::default(),
+    );
+    let mut request = SubscriptionRequest::new(plan);
+    request.transactions = Vec::new();
+    request.accounts = vec![account_filter];
+    grpc.subscribe(request, callback).await?;
 
     println!("等待 Ctrl+C 停止...");
     let shutdown = common::wait_for_shutdown(&grpc.subscription_handle).await;
-    grpc.stop().await;
+    let stopped = grpc.stop().await;
     shutdown?;
+    stopped?;
 
     Ok(())
 }
 
-fn create_event_callback() -> impl Fn(DexEvent) {
-    |event: DexEvent| {
-        match event {
-            DexEvent::MeteoraDlmmBinArrayAccountEvent(e) => {
-                println!("=== Meteora DLMM BinArray 账户更新 ===");
-                println!("账户地址: {}", e.pubkey);
-                println!("BinArray Index: {}", e.bin_array.index);
-                println!("版本: {}", e.bin_array.version);
-                println!("关联 LbPair: {}", e.bin_array.lb_pair);
+fn create_event_callback() -> impl for<'a> FnMut(StreamEvent<'a>) {
+    |stream| {
+        let StreamEvent::Account(view) = stream else {
+            return;
+        };
+        let Some(event) = view.decode() else {
+            return;
+        };
+        {
+            match event {
+                AccountEvent::MeteoraDlmmBinArrayAccountEvent(e) => {
+                    println!("=== Meteora DLMM BinArray 账户更新 ===");
+                    println!("账户地址: {}", e.pubkey);
+                    println!("BinArray Index: {}", e.bin_array.index);
+                    println!("版本: {}", e.bin_array.version);
+                    println!("关联 LbPair: {}", e.bin_array.lb_pair);
 
-                // 统计非空的 bin 数量
-                let non_empty_bins: usize = e
-                    .bin_array
-                    .bins
-                    .iter()
-                    .filter(|bin| bin.amount_x > 0 || bin.amount_y > 0 || bin.liquidity_supply > 0)
-                    .count();
+                    // 统计非空的 bin 数量
+                    let non_empty_bins: usize = e
+                        .bin_array
+                        .bins
+                        .iter()
+                        .filter(|bin| {
+                            bin.amount_x > 0 || bin.amount_y > 0 || bin.liquidity_supply > 0
+                        })
+                        .count();
 
-                println!("非空 Bin 数量: {}/70", non_empty_bins);
+                    println!("非空 Bin 数量: {}/70", non_empty_bins);
 
-                // 显示前几个非空 bin 的信息
-                let mut shown = 0;
-                for (idx, bin) in e.bin_array.bins.iter().enumerate() {
-                    if (bin.amount_x > 0 || bin.amount_y > 0 || bin.liquidity_supply > 0)
-                        && shown < 5
-                    {
-                        println!(
-                            "  Bin[{}]: X={}, Y={}, Price={}, Liquidity={}",
-                            idx, bin.amount_x, bin.amount_y, bin.price, bin.liquidity_supply
-                        );
-                        shown += 1;
+                    // 显示前几个非空 bin 的信息
+                    let mut shown = 0;
+                    for (idx, bin) in e.bin_array.bins.iter().enumerate() {
+                        if (bin.amount_x > 0 || bin.amount_y > 0 || bin.liquidity_supply > 0)
+                            && shown < 5
+                        {
+                            println!(
+                                "  Bin[{}]: X={}, Y={}, Price={}, Liquidity={}",
+                                idx, bin.amount_x, bin.amount_y, bin.price, bin.liquidity_supply
+                            );
+                            shown += 1;
+                        }
                     }
-                }
 
-                println!("Slot: {}", e.metadata.slot);
-                println!("=====================================");
-            }
-            _ => {
-                // 忽略其他事件
+                    println!("Slot: {}", view.frame.slot);
+                    println!("=====================================");
+                }
+                _ => {
+                    // 忽略其他事件
+                }
             }
         }
     }

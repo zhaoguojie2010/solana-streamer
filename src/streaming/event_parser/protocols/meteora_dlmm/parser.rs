@@ -1,3 +1,4 @@
+use crate::streaming::event_parser::InstructionAccounts;
 use crate::streaming::event_parser::{
     common::{read_u64_le, EventMetadata, EventType},
     protocols::meteora_dlmm::{
@@ -5,7 +6,7 @@ use crate::streaming::event_parser::{
         MeteoraDlmmInstructionEvent, MeteoraDlmmInstructionKind, MeteoraDlmmSwap2Event,
         MeteoraDlmmSwapEvent,
     },
-    DexEvent,
+    TxEvent,
 };
 use solana_sdk::pubkey::Pubkey;
 
@@ -31,16 +32,16 @@ struct ParsedSwapAccounts {
     memo_program: Option<Pubkey>,
     event_authority: Pubkey,
     program: Pubkey,
-    remaining_accounts: Vec<Pubkey>,
+    remaining_account_indices: Vec<u8>,
 }
 
 /// 解析 Meteora DLMM instruction data
 pub fn parse_meteora_dlmm_instruction_data(
     discriminator: &[u8],
     data: &[u8],
-    accounts: &[Pubkey],
+    accounts: InstructionAccounts<'_>,
     metadata: EventMetadata,
-) -> Option<DexEvent> {
+) -> Option<TxEvent> {
     match discriminator {
         discriminators::SWAP_IX => parse_swap_instruction(data, accounts, metadata),
         discriminators::SWAP2_IX => parse_swap2_instruction(data, accounts, metadata),
@@ -53,10 +54,10 @@ pub fn parse_meteora_dlmm_instruction_data(
 
 fn parse_modeled_instruction(
     discriminator: &[u8],
-    data: &[u8],
-    accounts: &[Pubkey],
-    metadata: EventMetadata,
-) -> Option<DexEvent> {
+    _data: &[u8],
+    _accounts: InstructionAccounts<'_>,
+    mut metadata: EventMetadata,
+) -> Option<TxEvent> {
     use MeteoraDlmmInstructionKind as Kind;
     let kind = match discriminator {
         discriminators::INITIALIZE_LB_PAIR_IX => Kind::InitializeLbPair,
@@ -129,12 +130,8 @@ fn parse_modeled_instruction(
         discriminators::CANCEL_LIMIT_ORDER_IX => Kind::CancelLimitOrder,
         _ => return None,
     };
-    Some(DexEvent::MeteoraDlmmInstructionEvent(MeteoraDlmmInstructionEvent {
-        metadata,
-        kind,
-        accounts: accounts.to_vec(),
-        data: data.to_vec(),
-    }))
+    metadata.event_type = EventType::MeteoraDlmmInstruction;
+    Some(TxEvent::MeteoraDlmmInstructionEvent(MeteoraDlmmInstructionEvent { metadata, kind }))
 }
 
 pub fn is_meteora_dlmm_swap_instruction(discriminator: &[u8]) -> bool {
@@ -149,7 +146,7 @@ pub fn parse_meteora_dlmm_inner_instruction_data(
     discriminator: &[u8],
     data: &[u8],
     metadata: EventMetadata,
-) -> Option<DexEvent> {
+) -> Option<TxEvent> {
     match discriminator {
         discriminators::SWAP_EVENT => parse_swap_inner_instruction(data, metadata),
         discriminators::SWAP2_EVENT => parse_swap2_inner_instruction(data, metadata),
@@ -162,9 +159,9 @@ pub fn parse_meteora_dlmm_inner_instruction_data(
 /// 根据判别器路由到具体的账户解析函数
 pub fn parse_meteora_dlmm_account_data(
     discriminator: &[u8],
-    account: crate::streaming::grpc::AccountPretty,
+    account: crate::streaming::grpc::AccountFrame,
     metadata: crate::streaming::event_parser::common::EventMetadata,
-) -> Option<crate::streaming::event_parser::DexEvent> {
+) -> Option<crate::streaming::event_parser::AccountEvent> {
     match discriminator {
         discriminators::LB_PAIR => {
             crate::streaming::event_parser::protocols::meteora_dlmm::types::lb_pair_parser(
@@ -190,9 +187,9 @@ pub fn parse_meteora_dlmm_account_data(
 
 fn parse_swap_instruction(
     data: &[u8],
-    accounts: &[Pubkey],
+    accounts: InstructionAccounts<'_>,
     mut metadata: EventMetadata,
-) -> Option<DexEvent> {
+) -> Option<TxEvent> {
     metadata.event_type = EventType::MeteoraDlmmSwap;
     if data.len() < 16 {
         return None;
@@ -202,7 +199,7 @@ fn parse_swap_instruction(
     let min_amount_out = read_u64_le(data, 8)?;
     let parsed_accounts = parse_swap_accounts(accounts, false)?;
 
-    Some(DexEvent::MeteoraDlmmSwapEvent(MeteoraDlmmSwapEvent {
+    Some(TxEvent::MeteoraDlmmSwapEvent(MeteoraDlmmSwapEvent {
         metadata,
         amount_in,
         min_amount_out,
@@ -221,16 +218,16 @@ fn parse_swap_instruction(
         token_y_program: parsed_accounts.token_y_program,
         event_authority: parsed_accounts.event_authority,
         program: parsed_accounts.program,
-        remaining_accounts: parsed_accounts.remaining_accounts,
+        remaining_account_indices: parsed_accounts.remaining_account_indices,
         ..Default::default()
     }))
 }
 
 fn parse_swap2_instruction(
     data: &[u8],
-    accounts: &[Pubkey],
+    accounts: InstructionAccounts<'_>,
     mut metadata: EventMetadata,
-) -> Option<DexEvent> {
+) -> Option<TxEvent> {
     metadata.event_type = EventType::MeteoraDlmmSwap2;
     if data.len() < 16 {
         return None;
@@ -240,7 +237,7 @@ fn parse_swap2_instruction(
     let min_amount_out = read_u64_le(data, 8)?;
     let parsed_accounts = parse_swap_accounts(accounts, true)?;
 
-    Some(DexEvent::MeteoraDlmmSwap2Event(MeteoraDlmmSwap2Event {
+    Some(TxEvent::MeteoraDlmmSwap2Event(MeteoraDlmmSwap2Event {
         metadata,
         amount_in,
         min_amount_out,
@@ -261,16 +258,16 @@ fn parse_swap2_instruction(
         memo_program: parsed_accounts.memo_program.unwrap_or_default(),
         event_authority: parsed_accounts.event_authority,
         program: parsed_accounts.program,
-        remaining_accounts: parsed_accounts.remaining_accounts,
+        remaining_account_indices: parsed_accounts.remaining_account_indices,
         ..Default::default()
     }))
 }
 
 fn parse_swap_exact_out2_instruction(
     data: &[u8],
-    accounts: &[Pubkey],
+    accounts: InstructionAccounts<'_>,
     mut metadata: EventMetadata,
-) -> Option<DexEvent> {
+) -> Option<TxEvent> {
     metadata.event_type = EventType::MeteoraDlmmSwap2;
     if data.len() < 16 {
         return None;
@@ -280,7 +277,7 @@ fn parse_swap_exact_out2_instruction(
     let amount_out = read_u64_le(data, 8)?;
     let parsed_accounts = parse_swap_accounts(accounts, true)?;
 
-    Some(DexEvent::MeteoraDlmmSwap2Event(MeteoraDlmmSwap2Event {
+    Some(TxEvent::MeteoraDlmmSwap2Event(MeteoraDlmmSwap2Event {
         metadata,
         max_amount_in,
         amount_out,
@@ -301,15 +298,15 @@ fn parse_swap_exact_out2_instruction(
         memo_program: parsed_accounts.memo_program.unwrap_or_default(),
         event_authority: parsed_accounts.event_authority,
         program: parsed_accounts.program,
-        remaining_accounts: parsed_accounts.remaining_accounts,
+        remaining_account_indices: parsed_accounts.remaining_account_indices,
         ..Default::default()
     }))
 }
 
-fn parse_swap_inner_instruction(data: &[u8], mut metadata: EventMetadata) -> Option<DexEvent> {
+fn parse_swap_inner_instruction(data: &[u8], mut metadata: EventMetadata) -> Option<TxEvent> {
     metadata.event_type = EventType::MeteoraDlmmSwap;
     let cpi_event = meteora_dlmm_swap_event_decode(data)?;
-    Some(DexEvent::MeteoraDlmmSwapEvent(MeteoraDlmmSwapEvent {
+    Some(TxEvent::MeteoraDlmmSwapEvent(MeteoraDlmmSwapEvent {
         metadata,
         lb_pair: cpi_event.lb_pair,
         from: cpi_event.from,
@@ -326,10 +323,10 @@ fn parse_swap_inner_instruction(data: &[u8], mut metadata: EventMetadata) -> Opt
     }))
 }
 
-fn parse_swap2_inner_instruction(data: &[u8], mut metadata: EventMetadata) -> Option<DexEvent> {
+fn parse_swap2_inner_instruction(data: &[u8], mut metadata: EventMetadata) -> Option<TxEvent> {
     metadata.event_type = EventType::MeteoraDlmmSwap2;
     let cpi_event = meteora_dlmm_swap2_event_decode(data)?;
-    Some(DexEvent::MeteoraDlmmSwap2Event(MeteoraDlmmSwap2Event {
+    Some(TxEvent::MeteoraDlmmSwap2Event(MeteoraDlmmSwap2Event {
         metadata,
         lb_pair: cpi_event.lb_pair,
         from: cpi_event.from,
@@ -342,16 +339,23 @@ fn parse_swap2_inner_instruction(data: &[u8], mut metadata: EventMetadata) -> Op
     }))
 }
 
-fn parse_swap_accounts(accounts: &[Pubkey], has_memo_program: bool) -> Option<ParsedSwapAccounts> {
+fn parse_swap_accounts(
+    accounts: InstructionAccounts<'_>,
+    has_memo_program: bool,
+) -> Option<ParsedSwapAccounts> {
     if accounts.len() < 8 {
         return None;
     }
 
-    let event_authority =
-        Pubkey::find_program_address(&[b"__event_authority"], &METEORA_DLMM_PROGRAM_ID).0;
+    // The PDA depends only on this program, never on the transaction.
+    static EVENT_AUTHORITY: std::sync::LazyLock<Pubkey> = std::sync::LazyLock::new(|| {
+        Pubkey::find_program_address(&[b"__event_authority"], &METEORA_DLMM_PROGRAM_ID).0
+    });
+    let event_authority = *EVENT_AUTHORITY;
     let event_authority_index = accounts
-        .windows(2)
-        .position(|window| window[0] == event_authority && window[1] == METEORA_DLMM_PROGRAM_ID)?;
+        .iter()
+        .zip(accounts.iter().skip(1))
+        .position(|(a, b)| *a == event_authority && *b == METEORA_DLMM_PROGRAM_ID)?;
 
     let (user_index, token_x_program_index, token_y_program_index, memo_program_index) =
         if has_memo_program {
@@ -371,7 +375,7 @@ fn parse_swap_accounts(accounts: &[Pubkey], has_memo_program: bool) -> Option<Pa
             (event_authority_index - 3, event_authority_index - 2, event_authority_index - 1, None)
         };
 
-    let prefix = &accounts[..user_index];
+    let prefix = accounts.prefix(user_index);
     let (
         lb_pair,
         bin_array_bitmap_extension,
@@ -386,8 +390,8 @@ fn parse_swap_accounts(accounts: &[Pubkey], has_memo_program: bool) -> Option<Pa
     ) = parse_swap_prefix(prefix)?;
 
     let remaining_start = event_authority_index + 2;
-    let remaining_accounts = if remaining_start < accounts.len() {
-        accounts[remaining_start..].to_vec()
+    let remaining_account_indices = if remaining_start < accounts.len() {
+        accounts.indices_from(remaining_start).collect()
     } else {
         vec![]
     };
@@ -409,13 +413,13 @@ fn parse_swap_accounts(accounts: &[Pubkey], has_memo_program: bool) -> Option<Pa
         memo_program: memo_program_index.and_then(|idx| accounts.get(idx).copied()),
         event_authority: *accounts.get(event_authority_index)?,
         program: *accounts.get(event_authority_index + 1)?,
-        remaining_accounts,
+        remaining_account_indices,
     })
 }
 
 #[allow(clippy::type_complexity)]
 fn parse_swap_prefix(
-    prefix: &[Pubkey],
+    prefix: InstructionAccounts<'_>,
 ) -> Option<(
     Pubkey,
     Option<Pubkey>,
@@ -476,4 +480,26 @@ fn parse_swap_prefix(
         oracle,
         host_fee_in,
     ))
+}
+
+/// Classify before allocating or decoding a protocol instruction.
+pub(crate) fn instruction_event_type(discriminator: &[u8]) -> Option<EventType> {
+    match discriminator {
+        discriminators::SWAP_IX => Some(EventType::MeteoraDlmmSwap),
+        discriminators::SWAP2_IX => Some(EventType::MeteoraDlmmSwap2),
+        discriminators::SWAP_EXACT_OUT2_IX => Some(EventType::MeteoraDlmmSwap2),
+        _ => Some(EventType::MeteoraDlmmInstruction),
+    }
+}
+
+/// Classify before allocating or decoding a protocol account.
+pub(crate) fn account_event_type(discriminator: &[u8]) -> Option<EventType> {
+    match discriminator {
+        discriminators::LB_PAIR => Some(EventType::AccountMeteoraDlmmLbPair),
+        discriminators::BIN_ARRAY => Some(EventType::AccountMeteoraDlmmBinArray),
+        discriminators::BIN_ARRAY_BITMAP_EXTENSION => {
+            Some(EventType::AccountMeteoraDlmmBinArrayBitmapExtension)
+        }
+        _ => None,
+    }
 }

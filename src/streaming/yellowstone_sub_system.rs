@@ -1,113 +1,77 @@
 use crate::{
     common::AnyResult,
     streaming::{
-        grpc::{pool::factory, EventPretty},
+        common::SubscriptionHandle,
+        grpc::TransactionPretty,
         yellowstone_grpc::{TransactionFilter, YellowstoneGrpc},
     },
 };
 use futures::{SinkExt, StreamExt};
-use log::error;
-use solana_program::pubkey;
-use solana_sdk::pubkey::Pubkey;
-use yellowstone_grpc_proto::geyser::SubscribeUpdateTransactionInfo;
 use yellowstone_grpc_proto::geyser::{
     subscribe_update::UpdateOneof, SubscribeRequest, SubscribeRequestPing,
+    SubscribeUpdateTransactionInfo,
 };
-
-const SYSTEM_PROGRAM_ID: Pubkey = pubkey!("11111111111111111111111111111111");
 
 #[derive(Debug)]
 pub enum SystemEvent {
     NewTransfer(TransferInfo),
     Error(String),
 }
-
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TransferInfo {
     pub slot: u64,
     pub signature: String,
     pub tx: Option<SubscribeUpdateTransactionInfo>,
 }
-
 impl YellowstoneGrpc {
+    /// Subscribe to raw transactions referencing the system program.
     pub async fn subscribe_system<F>(
         &self,
-        callback: F,
+        mut callback: F,
         account_include: Option<Vec<String>>,
         account_exclude: Option<Vec<String>>,
     ) -> AnyResult<()>
     where
-        F: Fn(SystemEvent) + Send + Sync + Clone + 'static,
+        F: FnMut(SystemEvent) + Send + 'static,
     {
-        let addrs = vec![SYSTEM_PROGRAM_ID.to_string()];
-        let account_include = account_include.unwrap_or_default();
-        let account_exclude = account_exclude.unwrap_or_default();
-        let tx_filter =
-            vec![TransactionFilter { account_include, account_exclude, account_required: addrs }];
-        let transactions = self.subscription_manager.get_subscribe_request_filter(tx_filter, None);
-        let (mut subscribe_tx, mut stream, _) = self
+        let mut handle = self.subscription_handle.lock().await;
+        anyhow::ensure!(
+            handle.as_ref().is_none_or(SubscriptionHandle::is_finished),
+            "already subscribed"
+        );
+        let filters = vec![TransactionFilter {
+            account_include: account_include.unwrap_or_default(),
+            account_exclude: account_exclude.unwrap_or_default(),
+            account_required: vec!["11111111111111111111111111111111".into()],
+        }];
+        let transactions = self.subscription_manager.get_subscribe_request_filter(filters, None);
+        let (mut sink, mut stream, _) = self
             .subscription_manager
             .subscribe_with_request(transactions, None, None, None)
             .await?;
-
-        let callback = Box::new(callback);
-
-        tokio::spawn(async move {
-            while let Some(message) = stream.next().await {
-                match message {
-                    Ok(msg) => {
-                        let created_at = msg.created_at;
-                        match msg.update_oneof {
-                            Some(UpdateOneof::Transaction(sut)) => {
-                                let transaction_pretty =
-                                    factory::create_transaction_pretty_pooled(sut, created_at);
-                                let event_pretty = EventPretty::Transaction(transaction_pretty);
-                                if let Err(e) =
-                                    Self::process_system_transaction(event_pretty, &*callback).await
-                                {
-                                    error!("Error processing transaction: {e:?}");
+        let (shutdown, mut closed) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    _ = &mut closed => return Ok(()),
+                    message = stream.next() => {
+                        match message {
+                            Some(Ok(message)) => match message.update_oneof {
+                                Some(UpdateOneof::Transaction(update)) => {
+                                    let tx = TransactionPretty::try_from((update, None))?;
+                                    callback(SystemEvent::NewTransfer(TransferInfo { slot: tx.slot, signature: tx.signature.to_string(), tx: Some(tx.grpc_tx) }));
                                 }
-                            }
-                            Some(UpdateOneof::Ping(_)) => {
-                                let _ = subscribe_tx
-                                    .send(SubscribeRequest {
-                                        ping: Some(SubscribeRequestPing { id: 1 }),
-                                        ..Default::default()
-                                    })
-                                    .await;
-                            }
-                            Some(UpdateOneof::Pong(_)) => {
-                                // Pong response, no action needed
-                            }
-                            _ => {
-                                // Other message types, ignore for system subscription
-                            }
+                                Some(UpdateOneof::Ping(_)) => sink.send(SubscribeRequest { ping: Some(SubscribeRequestPing { id: 1 }), ..SubscribeRequest::default() }).await?,
+                                _ => {}
+                            },
+                            Some(Err(error)) => { callback(SystemEvent::Error(error.to_string())); return Err(error.into()); }
+                            None => { callback(SystemEvent::Error("gRPC stream ended".into())); anyhow::bail!("gRPC stream ended"); }
                         }
-                    }
-                    Err(error) => {
-                        error!("Stream error: {error:?}");
-                        break;
                     }
                 }
             }
         });
-        Ok(())
-    }
-
-    async fn process_system_transaction<F>(event_pretty: EventPretty, callback: &F) -> AnyResult<()>
-    where
-        F: Fn(SystemEvent) + Send + Sync,
-    {
-        match event_pretty {
-            EventPretty::Transaction(transaction_pretty) => {
-                callback(SystemEvent::NewTransfer(TransferInfo {
-                    slot: transaction_pretty.slot,
-                    signature: transaction_pretty.signature.to_string(),
-                    tx: Some(transaction_pretty.grpc_tx),
-                }));
-            }
-            _ => {}
-        }
+        *handle = Some(SubscriptionHandle::new(task, shutdown));
         Ok(())
     }
 }

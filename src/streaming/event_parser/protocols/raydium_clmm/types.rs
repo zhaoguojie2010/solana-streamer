@@ -9,9 +9,9 @@ use crate::streaming::{
             RaydiumClmmAmmConfigAccountEvent, RaydiumClmmPoolStateAccountEvent,
             RaydiumClmmTickArrayBitmapExtensionAccountEvent, RaydiumClmmTickArrayStateAccountEvent,
         },
-        DexEvent,
+        AccountEvent,
     },
-    grpc::AccountPretty,
+    grpc::AccountFrame,
 };
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, BorshDeserialize)]
@@ -37,14 +37,17 @@ pub fn amm_config_decode(data: &[u8]) -> Option<AmmConfig> {
     borsh::from_slice::<AmmConfig>(&data[..AMM_CONFIG_SIZE]).ok()
 }
 
-pub fn amm_config_parser(account: AccountPretty, mut metadata: EventMetadata) -> Option<DexEvent> {
+pub fn amm_config_parser(
+    account: AccountFrame,
+    mut metadata: EventMetadata,
+) -> Option<AccountEvent> {
     metadata.event_type = EventType::AccountRaydiumClmmAmmConfig;
 
     if account.data.len() < AMM_CONFIG_SIZE + 8 {
         return None;
     }
     if let Some(amm_config) = amm_config_decode(&account.data[8..AMM_CONFIG_SIZE + 8]) {
-        Some(DexEvent::RaydiumClmmAmmConfigAccountEvent(RaydiumClmmAmmConfigAccountEvent {
+        Some(AccountEvent::RaydiumClmmAmmConfigAccountEvent(RaydiumClmmAmmConfigAccountEvent {
             metadata,
             pubkey: account.pubkey,
             executable: account.executable,
@@ -127,14 +130,17 @@ pub fn pool_state_decode(data: &[u8]) -> Option<PoolState> {
     borsh::from_slice::<PoolState>(&data[..POOL_STATE_SIZE]).ok()
 }
 
-pub fn pool_state_parser(account: AccountPretty, mut metadata: EventMetadata) -> Option<DexEvent> {
+pub fn pool_state_parser(
+    account: AccountFrame,
+    mut metadata: EventMetadata,
+) -> Option<AccountEvent> {
     metadata.event_type = EventType::AccountRaydiumClmmPoolState;
 
     if account.data.len() < POOL_STATE_SIZE + 8 {
         return None;
     }
     if let Some(pool_state) = pool_state_decode(&account.data[8..POOL_STATE_SIZE + 8]) {
-        Some(DexEvent::RaydiumClmmPoolStateAccountEvent(RaydiumClmmPoolStateAccountEvent {
+        Some(AccountEvent::RaydiumClmmPoolStateAccountEvent(RaydiumClmmPoolStateAccountEvent {
             metadata,
             pubkey: account.pubkey,
             executable: account.executable,
@@ -217,9 +223,9 @@ pub fn tick_array_state_decode(data: &[u8]) -> Option<TickArrayState> {
 }
 
 pub fn tick_array_state_parser(
-    account: AccountPretty,
+    account: AccountFrame,
     mut metadata: EventMetadata,
-) -> Option<DexEvent> {
+) -> Option<AccountEvent> {
     metadata.event_type = EventType::AccountRaydiumClmmTickArrayState;
 
     if account.data.len() < TICK_ARRAY_STATE_SIZE + 8 {
@@ -228,7 +234,7 @@ pub fn tick_array_state_parser(
     if let Some(tick_array_state) =
         tick_array_state_decode(&account.data[8..TICK_ARRAY_STATE_SIZE + 8])
     {
-        Some(DexEvent::RaydiumClmmTickArrayStateAccountEvent(
+        Some(AccountEvent::RaydiumClmmTickArrayStateAccountEvent(
             RaydiumClmmTickArrayStateAccountEvent {
                 metadata,
                 pubkey: account.pubkey,
@@ -320,9 +326,9 @@ pub fn tick_array_bitmap_extension_decode(data: &[u8]) -> Option<TickArrayBitmap
 }
 
 pub fn tick_array_bitmap_extension_parser(
-    account: AccountPretty,
+    account: AccountFrame,
     mut metadata: EventMetadata,
-) -> Option<DexEvent> {
+) -> Option<AccountEvent> {
     metadata.event_type = EventType::AccountRaydiumClmmTickArrayBitmapExtension;
 
     if account.data.len() < TICK_ARRAY_BITMAP_EXTENSION_SIZE + 8 {
@@ -331,7 +337,7 @@ pub fn tick_array_bitmap_extension_parser(
     if let Some(tick_array_bitmap_extension) =
         tick_array_bitmap_extension_decode(&account.data[8..TICK_ARRAY_BITMAP_EXTENSION_SIZE + 8])
     {
-        Some(DexEvent::RaydiumClmmTickArrayBitmapExtensionAccountEvent(
+        Some(AccountEvent::RaydiumClmmTickArrayBitmapExtensionAccountEvent(
             RaydiumClmmTickArrayBitmapExtensionAccountEvent {
                 metadata,
                 pubkey: account.pubkey,

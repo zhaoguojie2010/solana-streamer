@@ -1,398 +1,114 @@
-# Migration Guide: v0.5.x to v1.x.x
+# Migrating to transaction batches
 
-## Overview
+This guide describes the unreleased API in the current repository. Use a git/path dependency when following these examples. Consumers must migrate with the library; the old metadata-expanding and event-copying adapters have been removed.
 
-Version 1.0.0 introduces a significant architectural improvement by transitioning from a trait-based event system to an enum-based event system. This change brings:
+| Previous API | Current API |
+| --- | --- |
+| `DexEvent` | `TxEvent`, `AccountEvent`, separate block/slot events |
+| `TxDexEvents` | Owned `TxBatch` or borrowed `TxView` |
+| Async `EventParser` static methods | Reusable, synchronous `TxParser::visit` / `parse_owned` |
+| `subscribe_events_immediate` / transaction callbacks | `subscribe(SubscriptionRequest, FnMut(StreamEvent<'_>))` |
+| Cloning events before async work | `subscribe_queued(request, QueueConfig)` |
+| Per-event signature, slot, transaction index and time | `batch.meta`; account update metadata lives in `view.frame` |
+| `raw_dex_instructions`, modeled event `accounts` / `data` | `batch.instruction(event.metadata().instruction_index)` |
+| `remaining_accounts: Vec<Pubkey>` | `remaining_account_indices: Vec<u8>`, indexing `batch.keys` |
+| `AccountPretty`, account `Vec<u8>` | `AccountFrame`, shared `Bytes` |
+| Global metrics, transaction caches and object pools | Per-client metrics, worker-local scratch, direct payload moves |
 
-- **Better Type Safety**: Compile-time guarantees for event types
-- **Improved Performance**: Eliminates dynamic dispatch overhead (no `Box<dyn Trait>`)
-- **Simpler Code**: Standard Rust patterns instead of custom macros
-- **Better IDE Support**: Full autocomplete and type inference
-
-## Breaking Changes Summary
-
-| Component          | v0.5.x                      | v1.x.x                      |
-| ------------------ | --------------------------- | --------------------------- |
-| Event Type         | `Box<dyn UnifiedEvent>`     | `DexEvent` (enum)           |
-| Callback Signature | `Fn(Box<dyn UnifiedEvent>)` | `Fn(DexEvent)`              |
-| Event Matching     | `match_event!` macro        | Standard `match` expression |
-| Metadata Access    | `.event_type()`             | `.metadata().event_type`    |
-| Event Properties   | `.signature()`              | `.metadata().signature`     |
-
-## Migration Steps
-
-### Step 1: Update Callback Signatures
-
-**Before (v0.5.x):**
-
-```rust
-use solana_streamer_sdk::streaming::event_parser::UnifiedEvent;
-
-let callback = |event: Box<dyn UnifiedEvent>| {
-    println!("Received event: {:?}", event);
-};
-```
-
-**After (v1.x.x):**
-
-```rust
-use solana_streamer_sdk::streaming::event_parser::DexEvent;
-
-let callback = |event: DexEvent| {
-    println!("Received event: {:?}", event);
-};
-```
-
-### Step 2: Update Event Matching
-
-**Before (v0.5.x):**
-
-```rust
-use solana_streamer_sdk::match_event;
-
-match_event!(event, {
-    PumpFunTradeEvent => |e: PumpFunTradeEvent| {
-        println!("PumpFun trade: {:?}", e);
-    },
-    RaydiumCpmmSwapEvent => |e: RaydiumCpmmSwapEvent| {
-        println!("Raydium swap: {:?}", e);
-    },
-});
-```
-
-**After (v1.x.x):**
-
-```rust
-match event {
-    DexEvent::PumpFunTradeEvent(e) => {
-        println!("PumpFun trade: {:?}", e);
-    }
-    DexEvent::RaydiumCpmmSwapEvent(e) => {
-        println!("Raydium swap: {:?}", e);
-    }
-    _ => {}
-}
-```
-
-### Step 3: Update Metadata Access
-
-**Before (v0.5.x):**
-
-```rust
-let event_type = event.event_type();
-let signature = event.signature();
-let slot = event.slot();
-let protocol = event.protocol();
-```
-
-**After (v1.x.x):**
-
-```rust
-let event_type = event.metadata().event_type;
-let signature = event.metadata().signature;
-let slot = event.metadata().slot;
-let protocol = event.metadata().protocol;
-```
-
-### Step 4: Update Import Statements
-
-**Before (v0.5.x):**
-
-```rust
-use solana_streamer_sdk::{
-    match_event,
-    streaming::event_parser::{
-        UnifiedEvent,
-        protocols::{
-            pumpfun::{PumpFunTradeEvent, PumpFunCreateTokenEvent},
-            raydium_cpmm::{RaydiumCpmmSwapEvent},
-        },
-    },
-};
-```
-
-**After (v1.x.x):**
-
-```rust
-use solana_streamer_sdk::streaming::event_parser::{
-    DexEvent,
-    protocols::{
-        pumpfun::{PumpFunTradeEvent, PumpFunCreateTokenEvent},
-        raydium_cpmm::{RaydiumCpmmSwapEvent},
-    },
-};
-```
-
-Note: The `match_event!` macro is no longer needed or available.
-
-## Complete Example Migration
-
-### Before (v0.5.x)
-
-```rust
-use solana_streamer_sdk::{
-    match_event,
-    streaming::{
-        event_parser::{
-            UnifiedEvent,
-            protocols::{
-                pumpfun::{PumpFunTradeEvent, PumpFunCreateTokenEvent},
-                raydium_cpmm::RaydiumCpmmSwapEvent,
-            },
-        },
-        YellowstoneGrpc,
-    },
-};
-
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let grpc = YellowstoneGrpc::new(
-        "grpc-endpoint".to_string(),
-        Some("api-key".to_string()),
-    )?;
-
-    let callback = |event: Box<dyn UnifiedEvent>| {
-        println!(
-            "Event type: {:?}, Signature: {}",
-            event.event_type(),
-            event.signature()
-        );
-
-        match_event!(event, {
-            PumpFunTradeEvent => |e: PumpFunTradeEvent| {
-                println!("PumpFun trade: {} SOL", e.sol_amount);
-            },
-            PumpFunCreateTokenEvent => |e: PumpFunCreateTokenEvent| {
-                println!("New token: {}", e.name);
-            },
-            RaydiumCpmmSwapEvent => |e: RaydiumCpmmSwapEvent| {
-                println!("Raydium swap");
-            },
-        });
-    };
-
-    grpc.subscribe_events(
-        protocols,
-        event_filter,
-        tx_filter,
-        account_filter,
-        callback,
-    ).await?;
-
-    Ok(())
-}
-```
-
-### After (v1.x.x)
+## Borrowed delivery
 
 ```rust
 use solana_streamer_sdk::streaming::{
-    event_parser::{
-        DexEvent,
-        protocols::{
-            pumpfun::{PumpFunTradeEvent, PumpFunCreateTokenEvent},
-            raydium_cpmm::RaydiumCpmmSwapEvent,
-        },
-    },
-    YellowstoneGrpc,
+    event_parser::{common::EventType, ParseOptions, ParsePlan, Protocol, TxEvent},
+    yellowstone_grpc::{StreamEvent, SubscriptionRequest, TransactionFilter},
 };
-
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let grpc = YellowstoneGrpc::new(
-        "grpc-endpoint".to_string(),
-        Some("api-key".to_string()),
-    )?;
-
-    let callback = |event: DexEvent| {
-        println!(
-            "Event type: {:?}, Signature: {}",
-            event.metadata().event_type,
-            event.metadata().signature
-        );
-
-        match event {
-            DexEvent::PumpFunTradeEvent(e) => {
-                println!("PumpFun trade: {} SOL", e.sol_amount);
+let plan = ParsePlan::new(&[Protocol::PumpFun],
+    Some(&[EventType::PumpFunBuy, EventType::PumpFunSell]), ParseOptions::default());
+let mut request = SubscriptionRequest::new(plan);
+request.transactions = vec![TransactionFilter {
+    account_include: Protocol::PumpFun.get_program_id().iter().map(ToString::to_string).collect(),
+    ..TransactionFilter::default()
+}];
+grpc.subscribe(request, |message| {
+    if let StreamEvent::Transaction(batch) = message {
+        for event in batch.events {
+            if let TxEvent::PumpFunTradeEvent(trade) = event {
+                println!("{} {} {}", batch.meta.signature, batch.meta.slot, trade.sol_amount);
             }
-            DexEvent::PumpFunCreateTokenEvent(e) => {
-                println!("New token: {}", e.name);
-            }
-            DexEvent::RaydiumCpmmSwapEvent(e) => {
-                println!("Raydium swap");
-            }
-            _ => {}
         }
-    };
-
-    grpc.subscribe_events(
-        protocols,
-        event_filter,
-        tx_filter,
-        account_filter,
-        callback,
-    ).await?;
-
-    Ok(())
-}
-```
-
-## Advanced Patterns
-
-### Pattern 1: Event Filtering with Match
-
-**v1.x.x:**
-
-```rust
-let callback = |event: DexEvent| {
-    // Only process specific event types
-    match event {
-        DexEvent::PumpFunTradeEvent(e) if e.is_buy => {
-            println!("Buy: {} tokens", e.token_amount);
-        }
-        DexEvent::PumpFunTradeEvent(e) if !e.is_buy => {
-            println!("Sell: {} tokens", e.token_amount);
-        }
-        _ => {} // Ignore other events
     }
-};
+}).await?;
 ```
 
-### Pattern 2: Generic Event Processing
+A callback borrows one update and may mutate its own state without a `Sync` bound. It cannot retain the view across an await. Keep synchronous callbacks short; use the owned queue for database/network work. `TxView::to_owned()` explicitly deep-copies a view; `parse_owned` and queued delivery move buffers instead.
 
-**v1.x.x:**
+## Plans and source data
+
+`ParsePlan::new(protocols, None, options)` selects all event types; `Some(&[])` selects none. Filtering precedes event construction. Create instructions needed for developer flags remain dependencies even when excluded from output. State is reset between transactions, and later creates do not retroactively mark earlier trades.
+
+Batches with no events are still delivered when instruction/log retention, auditing or transaction summaries are requested. Otherwise empty batches are skipped.
+
+`ParseOptions::default()` enables instruction decoding, necessary CPI merging and transaction-local context. Log enrichment, log/raw retention, CU extraction, balance auditing, compute budget summaries, Jito detection and swap classification are opt-in:
+
+- `enrich_logs`, `retain_logs`, `retain_instructions` are independent.
+- `swap_cu: SwapCuParseConfig::default_enabled()` extracts selected swap CU from the same invocation index as log enrichment.
+- `balance_audit` replaces `ClientConfig.tx_exec_meta_audit`.
+- `compute_budget`, `detect_jito`, `classify_swaps` populate optional fields in `batch.summary`.
+- Classification uses the complete event sequence of selected protocols, including events excluded from output.
+
+`instruction_index` addresses the flattened sequence of each outer instruction followed by its CPIs, including non-DEX instructions. `outer_index` and `inner_index` preserve their original positions. Raw views include the discriminator and project account indices over the batch key table.
+
+Generic CLMM, DLMM, DAMM v2 and Whirlpool instruction events require their source. Their batches therefore keep the complete instruction sequence even when raw retention is off. Other decoded events remain usable without retaining instruction/log buffers; remaining-account indices still require `batch.keys`.
+
+Log association checks program, invocation order and stack depth. Incomplete or ambiguous invocations receive no inferred CU/execution observations. Completed children may still provide evidence. gRPC `created_at` is no longer treated as a block timestamp; transaction block time is 0 when unavailable. RPC execution metadata preserves Success/Failed; inputs without execution evidence use Unknown. Set `request.include_failed_transactions = true` to receive failed transactions.
+
+## Account views
+
+`StreamEvent::Account(view)` prefilters by owner/discriminator and does not decode a full snapshot automatically. Use checked `u64_at`, `u128_at` or `pubkey_at` with a known account layout, or explicitly call `view.decode()`. Snapshots share the original `Bytes`. Consumers may cache decoded snapshots by account version; the parser holds no cross-version account cache.
+
+## Owned queues and shutdown
 
 ```rust
-fn process_event(event: DexEvent) {
-    let metadata = event.metadata();
-
-    println!("Protocol: {:?}", metadata.protocol);
-    println!("Event Type: {:?}", metadata.event_type);
-    println!("Signature: {}", metadata.signature);
-    println!("Slot: {}", metadata.slot);
-
-    // Process specific event types
-    match event {
-        DexEvent::PumpFunTradeEvent(e) => handle_pumpfun_trade(e),
-        DexEvent::RaydiumCpmmSwapEvent(e) => handle_raydium_swap(e),
-        _ => {}
+use solana_streamer_sdk::streaming::common::{OwnedStreamEvent, QueueConfig};
+let mut queue = grpc.subscribe_queued(request, QueueConfig::default()).await?;
+while let Some(envelope) = queue.recv().await? {
+    if let OwnedStreamEvent::Transaction(batch) = &*envelope {
+        println!("{}", batch.meta.signature);
+        // The envelope can remain alive across awaits.
     }
 }
 ```
 
-### Pattern 3: Event Type Categorization
+The defaults are 256 items, 64 MiB of charged payload capacity and a 5-second maximum delivery age. Capacity/byte overload stops the subscription immediately. Accepted items drain in order before the error is returned. Stale delivery closes and clears the queue with an explicit error. Dropping the receiver closes production.
 
-**v1.x.x:**
+An envelope keeps its byte permit after dequeue until it is dropped. Charges include Vec/String capacity and visible account bytes, excluding allocator/channel overhead and potentially larger shared `Bytes` backing allocations. This is a payload budget, not an RSS limit.
 
-```rust
-fn categorize_event(event: &DexEvent) -> &'static str {
-    match event {
-        DexEvent::PumpFunTradeEvent(_)
-        | DexEvent::PumpSwapBuyEvent(_)
-        | DexEvent::PumpSwapSellEvent(_) => "Trade",
+`grpc.stop().await?` waits for current synchronous processing and closes production; accepted queue items remain drainable. `last_error()`, `stop()` and handle `join()` expose failures. The caller decides how to reconnect and recover missing updates; the SDK does not automatically reconnect or reorder across streams.
 
-        DexEvent::PumpFunCreateTokenEvent(_)
-        | DexEvent::PumpSwapCreatePoolEvent(_) => "Creation",
+## Offline parsing and metrics
 
-        DexEvent::RaydiumCpmmDepositEvent(_)
-        | DexEvent::RaydiumCpmmWithdrawEvent(_) => "Liquidity",
+RPC lives outside the core and is disabled by default:
 
-        _ => "Other",
-    }
-}
+| Feature | Capabilities |
+| --- | --- |
+| Default (none) | gRPC streaming, account decoding and pure transaction parsing |
+| `rpc` | The `rpc` module, response types and `rpc::transaction_frame(response, recv_us)`, without an HTTP client |
+| `rpc-client` | Includes `rpc` plus `rpc::RpcClient`, `RpcTransactionConfig` and `CommitmentConfig` for query tools |
+
+Replace `TxFrame::from_rpc` with `rpc::transaction_frame`. The `common::SolanaRpcClient` alias is removed. The helper `parse_swap_data_from_next_instructions`, which accepts RPC `InnerInstructions`, also moves to `rpc`. The caller or example owns HTTP queries; the core exposes no RPC transaction types.
+
+`TxFrame::from_versioned` remains available by default for an owned SDK transaction and its resolved static + writable ALT + readonly ALT key table. It performs no network access. Invalid keys/indices are errors.
+
+```bash
+cargo run --features rpc-client --example parse_tx_events -- <signature>
+cargo test --features rpc --test rpc_adapter
+cargo build --examples --features rpc-client
 ```
 
-## EventParser API Changes
+The default examples build includes 19 gRPC examples. The [historical transaction example](examples/parse_tx_events.rs) requires `rpc-client`.
 
-### Parsing Transactions
+Keep one parser per worker. `ScratchLimits` bounds retained scratch capacity after large inputs; owned output buffers cannot be reused while a consumer owns them.
 
-**Before (v0.5.x):**
+`ClientConfig.enable_metrics` selects metrics at subscription startup. Disabled streams allocate no metrics callbacks and perform no metrics counting. Enabled workers merge local counts every 128 transaction/account/block updates or one second. `processing_us` includes synchronous delivery and is not a pure decoder latency measurement.
 
-```rust
-let parser = Arc::new(EventParser::new(protocols, event_filter));
-parser.parse_encoded_confirmed_transaction_with_status_meta(
-    signature,
-    transaction,
-    Arc::new(|event: &Box<dyn UnifiedEvent>| {
-        println!("{:?}", event);
-    }),
-).await?;
-```
-
-**After (v1.x.x):**
-
-```rust
-EventParser::parse_encoded_confirmed_transaction_with_status_meta(
-    &protocols,
-    event_filter.as_ref(),
-    signature,
-    transaction,
-    Arc::new(|event: &DexEvent| {
-        println!("{:?}", event);
-    }),
-).await?;
-```
-
-The `EventParser` is now stateless with static methods, eliminating the need to create an instance.
-
-## Common Pitfalls
-
-### Pitfall 1: Forgetting to Handle All Variants
-
-❌ **Incorrect:**
-
-```rust
-match event {
-    DexEvent::PumpFunTradeEvent(e) => { /* ... */ }
-    // Missing other variants!
-}
-```
-
-✅ **Correct:**
-
-```rust
-match event {
-    DexEvent::PumpFunTradeEvent(e) => { /* ... */ }
-    _ => {} // Handle or ignore other events
-}
-```
-
-### Pitfall 2: Using Old Metadata Access Pattern
-
-❌ **Incorrect:**
-
-```rust
-let sig = event.signature(); // Method doesn't exist anymore
-```
-
-✅ **Correct:**
-
-```rust
-let sig = event.metadata().signature;
-```
-
-### Pitfall 3: Attempting to Use `match_event!` Macro
-
-❌ **Incorrect:**
-
-```rust
-match_event!(event, { /* ... */ }); // Macro no longer exists
-```
-
-✅ **Correct:**
-
-```rust
-match event {
-    DexEvent::PumpFunTradeEvent(e) => { /* ... */ }
-    _ => {}
-}
-```
-
-## Benefits of the New System
-
-1. **Type Safety**: The compiler catches more errors at compile time
-2. **Performance**: No dynamic dispatch overhead
-3. **Simplicity**: Standard Rust patterns, no custom macros
-4. **Better Tooling**: Full IDE support with autocomplete
-5. **Easier Debugging**: Clearer stack traces and error messages
-6. **Serialization**: Built-in `Serialize`/`Deserialize` support for all events
+See [grpc_example](examples/grpc_example.rs), [queued_subscription](examples/queued_subscription.rs), [dynamic_subscription](examples/dynamic_subscription.rs), the [Chinese migration guide](MIGRATION_CN.md) and the [architecture/validation record](docs/performance-architecture.md).

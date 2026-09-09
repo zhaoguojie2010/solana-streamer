@@ -1,9 +1,13 @@
+use solana_streamer_sdk::streaming::{
+    event_parser::{ParseOptions, ParsePlan},
+    yellowstone_grpc::{StreamEvent, SubscriptionRequest},
+};
 mod common;
 
 use solana_streamer_sdk::streaming::{
-    event_parser::{protocols::whirlpool::parser::WHIRLPOOL_PROGRAM_ID, DexEvent, Protocol},
+    event_parser::{protocols::whirlpool::parser::WHIRLPOOL_PROGRAM_ID, AccountEvent, Protocol},
     grpc::ClientConfig,
-    yellowstone_grpc::{AccountFilter, TransactionFilter},
+    yellowstone_grpc::AccountFilter,
     YellowstoneGrpc,
 };
 
@@ -46,11 +50,6 @@ async fn subscribe_whirlpool_accounts() -> Result<(), Box<dyn std::error::Error>
     };
 
     // 交易过滤器（可选，如果只想订阅账户数据，可以留空）
-    let transaction_filter = TransactionFilter {
-        account_include: vec![WHIRLPOOL_PROGRAM_ID.to_string()],
-        account_exclude: vec![],
-        account_required: vec![],
-    };
 
     // 事件类型过滤器 - 只订阅账户事件
     use solana_streamer_sdk::streaming::event_parser::common::filter::EventTypeFilter;
@@ -62,59 +61,70 @@ async fn subscribe_whirlpool_accounts() -> Result<(), Box<dyn std::error::Error>
 
     println!("开始订阅...");
 
-    grpc.subscribe_events_immediate(
-        protocols,
-        None,
-        vec![transaction_filter],
-        vec![account_filter],
-        event_type_filter,
-        None,
-        callback,
-    )
-    .await?;
+    let plan = ParsePlan::new(
+        &protocols,
+        event_type_filter.as_ref().map(
+            |f: &solana_streamer_sdk::streaming::event_parser::common::filter::EventTypeFilter| {
+                f.include.as_slice()
+            },
+        ),
+        ParseOptions::default(),
+    );
+    let mut request = SubscriptionRequest::new(plan);
+    request.transactions = Vec::new();
+    request.accounts = vec![account_filter];
+    grpc.subscribe(request, callback).await?;
 
     println!("等待 Ctrl+C 停止...");
     let shutdown = common::wait_for_shutdown(&grpc.subscription_handle).await;
-    grpc.stop().await;
+    let stopped = grpc.stop().await;
     shutdown?;
+    stopped?;
 
     Ok(())
 }
 
-fn create_event_callback() -> impl Fn(DexEvent) {
-    |event: DexEvent| {
-        // println!(
-        //     "🎉 事件接收! 类型: {:?}, slot: {:?}",
-        //     event.metadata().event_type,
-        //     event.metadata().slot
-        // );
-        match event {
-            DexEvent::WhirlpoolAccountEvent(e) => {
-                println!("=== Whirlpool 账户更新 ===");
-                println!("账户地址: {}", e.pubkey);
-                println!("Whirlpools Config: {}", e.whirlpool.whirlpools_config);
-                println!("Token Mint A: {}", e.whirlpool.token_mint_a);
-                println!("Token Mint B: {}", e.whirlpool.token_mint_b);
-                println!("Token Vault A: {}", e.whirlpool.token_vault_a);
-                println!("Token Vault B: {}", e.whirlpool.token_vault_b);
-                println!("Tick Spacing: {}", e.whirlpool.tick_spacing);
-                println!("Fee Rate: {}", e.whirlpool.fee_rate);
-                println!("Protocol Fee Rate: {}", e.whirlpool.protocol_fee_rate);
-                println!("Liquidity: {}", e.whirlpool.liquidity);
-                println!("Sqrt Price: {}", e.whirlpool.sqrt_price);
-                println!("Tick Current Index: {}", e.whirlpool.tick_current_index);
-                println!("Protocol Fee Owed A: {}", e.whirlpool.protocol_fee_owed_a);
-                println!("Protocol Fee Owed B: {}", e.whirlpool.protocol_fee_owed_b);
-                println!("Fee Growth Global A: {}", e.whirlpool.fee_growth_global_a);
-                println!("Fee Growth Global B: {}", e.whirlpool.fee_growth_global_b);
-                println!(
-                    "Reward Last Updated Timestamp: {}",
-                    e.whirlpool.reward_last_updated_timestamp
-                );
-                println!("奖励信息数量: {}", e.whirlpool.reward_infos.len());
-                for (i, reward_info) in e.whirlpool.reward_infos.iter().enumerate() {
-                    if reward_info.mint != solana_sdk::pubkey::Pubkey::default() {
-                        println!(
+fn create_event_callback() -> impl for<'a> FnMut(StreamEvent<'a>) {
+    |stream| {
+        let StreamEvent::Account(view) = stream else {
+            return;
+        };
+        let Some(event) = view.decode() else {
+            return;
+        };
+        {
+            // println!(
+            //     "🎉 事件接收! 类型: {:?}, slot: {:?}",
+            //     event.metadata().event_type,
+            //     event.metadata().slot
+            // );
+            match event {
+                AccountEvent::WhirlpoolAccountEvent(e) => {
+                    println!("=== Whirlpool 账户更新 ===");
+                    println!("账户地址: {}", e.pubkey);
+                    println!("Whirlpools Config: {}", e.whirlpool.whirlpools_config);
+                    println!("Token Mint A: {}", e.whirlpool.token_mint_a);
+                    println!("Token Mint B: {}", e.whirlpool.token_mint_b);
+                    println!("Token Vault A: {}", e.whirlpool.token_vault_a);
+                    println!("Token Vault B: {}", e.whirlpool.token_vault_b);
+                    println!("Tick Spacing: {}", e.whirlpool.tick_spacing);
+                    println!("Fee Rate: {}", e.whirlpool.fee_rate);
+                    println!("Protocol Fee Rate: {}", e.whirlpool.protocol_fee_rate);
+                    println!("Liquidity: {}", e.whirlpool.liquidity);
+                    println!("Sqrt Price: {}", e.whirlpool.sqrt_price);
+                    println!("Tick Current Index: {}", e.whirlpool.tick_current_index);
+                    println!("Protocol Fee Owed A: {}", e.whirlpool.protocol_fee_owed_a);
+                    println!("Protocol Fee Owed B: {}", e.whirlpool.protocol_fee_owed_b);
+                    println!("Fee Growth Global A: {}", e.whirlpool.fee_growth_global_a);
+                    println!("Fee Growth Global B: {}", e.whirlpool.fee_growth_global_b);
+                    println!(
+                        "Reward Last Updated Timestamp: {}",
+                        e.whirlpool.reward_last_updated_timestamp
+                    );
+                    println!("奖励信息数量: {}", e.whirlpool.reward_infos.len());
+                    for (i, reward_info) in e.whirlpool.reward_infos.iter().enumerate() {
+                        if reward_info.mint != solana_sdk::pubkey::Pubkey::default() {
+                            println!(
                             "  奖励 {}: Mint={}, Vault={}, Authority={}, Emissions={}, Growth={}",
                             i,
                             reward_info.mint,
@@ -123,12 +133,13 @@ fn create_event_callback() -> impl Fn(DexEvent) {
                             reward_info.emissions_per_second_x64,
                             reward_info.growth_global_x64
                         );
+                        }
                     }
+                    println!("=====================================");
                 }
-                println!("=====================================");
-            }
-            _ => {
-                //println!("其他事件: {:?}", event);
+                _ => {
+                    //println!("其他事件: {:?}", event);
+                }
             }
         }
     }

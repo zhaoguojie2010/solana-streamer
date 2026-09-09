@@ -1,7 +1,11 @@
+use solana_streamer_sdk::streaming::{
+    event_parser::{ParseOptions, ParsePlan},
+    yellowstone_grpc::{StreamEvent, SubscriptionRequest},
+};
 mod common;
 
 use solana_streamer_sdk::streaming::event_parser::protocols::raydium_cpmm::parser::RAYDIUM_CPMM_PROGRAM_ID;
-use solana_streamer_sdk::streaming::event_parser::{DexEvent, Protocol};
+use solana_streamer_sdk::streaming::event_parser::{Protocol, TxEvent};
 use solana_streamer_sdk::streaming::{
     grpc::ClientConfig, yellowstone_grpc::TransactionFilter, YellowstoneGrpc,
 };
@@ -49,73 +53,84 @@ async fn subscribe_raydium_cpmm_swaps() -> Result<(), Box<dyn std::error::Error>
     println!("开始监听事件，按 Ctrl+C 停止...");
     println!("监控程序: {}", RAYDIUM_CPMM_PROGRAM_ID);
 
-    grpc.subscribe_events_immediate(
-        protocols,
-        None,
-        vec![transaction_filter],
-        vec![],
-        event_type_filter,
-        None,
-        callback,
-    )
-    .await?;
+    let plan = ParsePlan::new(
+        &protocols,
+        event_type_filter.as_ref().map(
+            |f: &solana_streamer_sdk::streaming::event_parser::common::filter::EventTypeFilter| {
+                f.include.as_slice()
+            },
+        ),
+        ParseOptions { enrich_logs: true, ..ParseOptions::default() },
+    );
+    let mut request = SubscriptionRequest::new(plan);
+    request.transactions = vec![transaction_filter];
+    request.accounts = Vec::new();
+    grpc.subscribe(request, callback).await?;
 
     println!("等待 Ctrl+C 停止...");
     let shutdown = common::wait_for_shutdown(&grpc.subscription_handle).await;
-    grpc.stop().await;
+    let stopped = grpc.stop().await;
     shutdown?;
+    stopped?;
 
     Ok(())
 }
 
-fn create_event_callback() -> impl Fn(DexEvent) {
-    |event: DexEvent| {
-        match event {
-            DexEvent::RaydiumCpmmSwapEvent(e) => {
-                println!("=== Raydium CPMM Swap 事件 ===");
-                println!("事件类型: {:?}", e.metadata.event_type);
-                println!("交易签名: {}", e.metadata.signature);
-                println!("Slot: {}", e.metadata.slot);
-                println!();
+fn create_event_callback() -> impl for<'a> FnMut(StreamEvent<'a>) {
+    |stream| {
+        let StreamEvent::Transaction(batch) = stream else {
+            return;
+        };
+        for event in batch.events {
+            {
+                match event {
+                    TxEvent::RaydiumCpmmSwapEvent(e) => {
+                        println!("=== Raydium CPMM Swap 事件 ===");
+                        println!("事件类型: {:?}", e.metadata.event_type);
+                        println!("交易签名: {}", batch.meta.signature);
+                        println!("Slot: {}", batch.meta.slot);
+                        println!();
 
-                // 指令参数
-                println!("--- 指令参数 ---");
-                if e.amount_in > 0 {
-                    println!("输入金额: {}", e.amount_in);
-                    println!("最小输出: {}", e.minimum_amount_out);
-                } else {
-                    println!("最大输入: {}", e.max_amount_in);
-                    println!("输出金额: {}", e.amount_out);
+                        // 指令参数
+                        println!("--- 指令参数 ---");
+                        if e.amount_in > 0 {
+                            println!("输入金额: {}", e.amount_in);
+                            println!("最小输出: {}", e.minimum_amount_out);
+                        } else {
+                            println!("最大输入: {}", e.max_amount_in);
+                            println!("输出金额: {}", e.amount_out);
+                        }
+                        println!();
+
+                        // 从日志解析的事件数据
+                        if e.input_amount > 0 || e.output_amount > 0 {
+                            println!("--- 从日志解析的实际数据 ---");
+                            println!("输入 Vault 之前余额: {}", e.input_vault_before);
+                            println!("输出 Vault 之前余额: {}", e.output_vault_before);
+                            println!("实际输入金额: {}", e.input_amount);
+                            println!("实际输出金额: {}", e.output_amount);
+                            println!("输入转账费: {}", e.input_transfer_fee);
+                            println!("输出转账费: {}", e.output_transfer_fee);
+                            println!("交易费: {}", e.trade_fee);
+                            println!("创建者费用: {}", e.creator_fee);
+                            println!("基于输入: {}", e.base_input);
+                            println!();
+                        }
+
+                        // 账户信息
+                        println!("--- 账户信息 ---");
+                        println!("付款人: {}", e.payer);
+                        println!("池状态: {}", e.pool_state);
+                        println!("输入代币: {}", e.input_token_mint);
+                        println!("输出代币: {}", e.output_token_mint);
+                        println!("输入 Vault: {}", e.input_vault);
+                        println!("输出 Vault: {}", e.output_vault);
+                        println!("=====================================\n");
+                    }
+                    _ => {
+                        // 其他事件
+                    }
                 }
-                println!();
-
-                // 从日志解析的事件数据
-                if e.input_amount > 0 || e.output_amount > 0 {
-                    println!("--- 从日志解析的实际数据 ---");
-                    println!("输入 Vault 之前余额: {}", e.input_vault_before);
-                    println!("输出 Vault 之前余额: {}", e.output_vault_before);
-                    println!("实际输入金额: {}", e.input_amount);
-                    println!("实际输出金额: {}", e.output_amount);
-                    println!("输入转账费: {}", e.input_transfer_fee);
-                    println!("输出转账费: {}", e.output_transfer_fee);
-                    println!("交易费: {}", e.trade_fee);
-                    println!("创建者费用: {}", e.creator_fee);
-                    println!("基于输入: {}", e.base_input);
-                    println!();
-                }
-
-                // 账户信息
-                println!("--- 账户信息 ---");
-                println!("付款人: {}", e.payer);
-                println!("池状态: {}", e.pool_state);
-                println!("输入代币: {}", e.input_token_mint);
-                println!("输出代币: {}", e.output_token_mint);
-                println!("输入 Vault: {}", e.input_vault);
-                println!("输出 Vault: {}", e.output_vault);
-                println!("=====================================\n");
-            }
-            _ => {
-                // 其他事件
             }
         }
     }

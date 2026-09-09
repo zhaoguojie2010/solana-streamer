@@ -51,9 +51,7 @@ pub enum RaydiumClmmInstructionKind {
 pub struct RaydiumClmmInstructionEvent {
     pub metadata: EventMetadata,
     pub kind: RaydiumClmmInstructionKind,
-    pub accounts: Vec<Pubkey>,
     /// Anchor instruction payload after the 8-byte discriminator.
-    pub data: Vec<u8>,
     /// Ordered Anchor events emitted while this instruction executed. Router instructions can
     /// emit multiple swaps, so this intentionally remains a vector.
     #[serde(default)]
@@ -119,7 +117,7 @@ pub struct RaydiumClmmSwapEvent {
     pub observation_state: Pubkey,
     pub token_program: Pubkey,
     pub tick_array: Pubkey,
-    pub remaining_accounts: Vec<Pubkey>,
+    pub remaining_account_indices: Vec<u8>,
 }
 
 /// 交易v2
@@ -155,7 +153,7 @@ pub struct RaydiumClmmSwapV2Event {
     pub memo_program: Pubkey,
     pub input_vault_mint: Pubkey,
     pub output_vault_mint: Pubkey,
-    pub remaining_accounts: Vec<Pubkey>,
+    pub remaining_account_indices: Vec<u8>,
 }
 
 /// 关闭仓位
@@ -193,7 +191,7 @@ pub struct RaydiumClmmDecreaseLiquidityV2Event {
     pub memo_program: Pubkey,
     pub vault0_mint: Pubkey,
     pub vault1_mint: Pubkey,
-    pub remaining_accounts: Vec<Pubkey>,
+    pub remaining_account_indices: Vec<u8>,
 }
 
 /// 创建池
@@ -314,7 +312,7 @@ pub struct RaydiumClmmOpenPositionV2Event {
     pub token_program2022: Pubkey,
     pub vault0_mint: Pubkey,
     pub vault1_mint: Pubkey,
-    pub remaining_accounts: Vec<Pubkey>,
+    pub remaining_account_indices: Vec<u8>,
 }
 
 /// 池配置
@@ -327,7 +325,7 @@ pub struct RaydiumClmmAmmConfigAccountEvent {
     pub owner: Pubkey,
     pub rent_epoch: u64,
     #[serde(skip)]
-    pub raw_account_data: Vec<u8>,
+    pub raw_account_data: bytes::Bytes,
     pub amm_config: AmmConfig,
 }
 
@@ -341,7 +339,7 @@ pub struct RaydiumClmmPoolStateAccountEvent {
     pub owner: Pubkey,
     pub rent_epoch: u64,
     #[serde(skip)]
-    pub raw_account_data: Vec<u8>,
+    pub raw_account_data: bytes::Bytes,
     pub pool_state: PoolState,
 }
 
@@ -355,7 +353,7 @@ pub struct RaydiumClmmTickArrayStateAccountEvent {
     pub owner: Pubkey,
     pub rent_epoch: u64,
     #[serde(skip)]
-    pub raw_account_data: Vec<u8>,
+    pub raw_account_data: bytes::Bytes,
     pub tick_array_state: TickArrayState,
 }
 
@@ -369,7 +367,7 @@ pub struct RaydiumClmmTickArrayBitmapExtensionAccountEvent {
     pub owner: Pubkey,
     pub rent_epoch: u64,
     #[serde(skip)]
-    pub raw_account_data: Vec<u8>,
+    pub raw_account_data: bytes::Bytes,
     pub tick_array_bitmap_extension: TickArrayBitmapExtension,
 }
 

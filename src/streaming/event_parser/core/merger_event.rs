@@ -1,10 +1,10 @@
-use crate::streaming::event_parser::DexEvent;
+use crate::streaming::event_parser::TxEvent;
 
-pub fn merge(instruction_event: &mut DexEvent, cpi_log_event: DexEvent) {
+pub fn merge(instruction_event: &mut TxEvent, cpi_log_event: TxEvent) {
     match instruction_event {
         // PumpFun events
-        DexEvent::PumpFunTradeEvent(e) => match cpi_log_event {
-            DexEvent::PumpFunTradeEvent(cpie) => {
+        TxEvent::PumpFunTradeEvent(e) => match cpi_log_event {
+            TxEvent::PumpFunTradeEvent(cpie) => {
                 e.mint = cpie.mint;
                 e.sol_amount = cpie.sol_amount;
                 e.token_amount = cpie.token_amount;
@@ -24,8 +24,8 @@ pub fn merge(instruction_event: &mut DexEvent, cpi_log_event: DexEvent) {
             }
             _ => {}
         },
-        DexEvent::PumpFunCreateTokenEvent(e) => match cpi_log_event {
-            DexEvent::PumpFunCreateV2TokenEvent(cpie) => {
+        TxEvent::PumpFunCreateTokenEvent(e) => match cpi_log_event {
+            TxEvent::PumpFunCreateV2TokenEvent(cpie) => {
                 e.mint = cpie.mint;
                 e.bonding_curve = cpie.bonding_curve;
                 e.user = cpie.user;
@@ -40,8 +40,8 @@ pub fn merge(instruction_event: &mut DexEvent, cpi_log_event: DexEvent) {
             }
             _ => {}
         },
-        DexEvent::PumpFunCreateV2TokenEvent(e) => match cpi_log_event {
-            DexEvent::PumpFunCreateV2TokenEvent(cpie) => {
+        TxEvent::PumpFunCreateV2TokenEvent(e) => match cpi_log_event {
+            TxEvent::PumpFunCreateV2TokenEvent(cpie) => {
                 e.mint = cpie.mint;
                 e.bonding_curve = cpie.bonding_curve;
                 e.user = cpie.user;
@@ -56,8 +56,8 @@ pub fn merge(instruction_event: &mut DexEvent, cpi_log_event: DexEvent) {
             }
             _ => {}
         },
-        DexEvent::PumpFunMigrateEvent(e) => match cpi_log_event {
-            DexEvent::PumpFunMigrateEvent(cpie) => {
+        TxEvent::PumpFunMigrateEvent(e) => match cpi_log_event {
+            TxEvent::PumpFunMigrateEvent(cpie) => {
                 e.user = cpie.user;
                 e.mint = cpie.mint;
                 e.mint_amount = cpie.mint_amount;
@@ -71,8 +71,8 @@ pub fn merge(instruction_event: &mut DexEvent, cpi_log_event: DexEvent) {
         },
 
         // Bonk events
-        DexEvent::BonkTradeEvent(e) => match cpi_log_event {
-            DexEvent::BonkTradeEvent(cpie) => {
+        TxEvent::BonkTradeEvent(e) => match cpi_log_event {
+            TxEvent::BonkTradeEvent(cpie) => {
                 e.pool_state = cpie.pool_state;
                 e.total_base_sell = cpie.total_base_sell;
                 e.virtual_base = cpie.virtual_base;
@@ -93,8 +93,8 @@ pub fn merge(instruction_event: &mut DexEvent, cpi_log_event: DexEvent) {
             }
             _ => {}
         },
-        DexEvent::BonkPoolCreateEvent(e) => match cpi_log_event {
-            DexEvent::BonkPoolCreateEvent(cpie) => {
+        TxEvent::BonkPoolCreateEvent(e) => match cpi_log_event {
+            TxEvent::BonkPoolCreateEvent(cpie) => {
                 e.pool_state = cpie.pool_state;
                 e.creator = cpie.creator;
                 e.config = cpie.config;
@@ -105,8 +105,8 @@ pub fn merge(instruction_event: &mut DexEvent, cpi_log_event: DexEvent) {
             }
             _ => {}
         },
-        DexEvent::BonkMigrateToAmmEvent(e) => match cpi_log_event {
-            DexEvent::BonkMigrateToAmmEvent(cpie) => {
+        TxEvent::BonkMigrateToAmmEvent(e) => match cpi_log_event {
+            TxEvent::BonkMigrateToAmmEvent(cpie) => {
                 e.base_lot_size = cpie.base_lot_size;
                 e.quote_lot_size = cpie.quote_lot_size;
                 e.market_vault_signer_nonce = cpie.market_vault_signer_nonce;
@@ -115,8 +115,8 @@ pub fn merge(instruction_event: &mut DexEvent, cpi_log_event: DexEvent) {
         },
 
         // PumpSwap events
-        DexEvent::PumpSwapBuyEvent(e) => match cpi_log_event {
-            DexEvent::PumpSwapBuyEvent(cpie) => {
+        TxEvent::PumpSwapBuyEvent(e) => match cpi_log_event {
+            TxEvent::PumpSwapBuyEvent(cpie) => {
                 e.timestamp = cpie.timestamp;
                 e.base_amount_out = cpie.base_amount_out;
                 e.max_quote_amount_in = cpie.max_quote_amount_in;
@@ -146,7 +146,7 @@ pub fn merge(instruction_event: &mut DexEvent, cpi_log_event: DexEvent) {
                 e.current_sol_volume = cpie.current_sol_volume;
                 e.last_update_timestamp = cpie.last_update_timestamp;
                 e.min_base_amount_out = cpie.min_base_amount_out;
-                e.ix_name = cpie.ix_name.clone();
+                e.ix_name = cpie.ix_name;
                 e.cashback_fee_basis_points = cpie.cashback_fee_basis_points;
                 e.cashback = cpie.cashback;
                 e.buyback_fee_basis_points = cpie.buyback_fee_basis_points;
@@ -157,8 +157,8 @@ pub fn merge(instruction_event: &mut DexEvent, cpi_log_event: DexEvent) {
             }
             _ => {}
         },
-        DexEvent::PumpSwapBuyExactQuoteInEvent(e) => match cpi_log_event {
-            DexEvent::PumpSwapBuyEvent(cpie) => {
+        TxEvent::PumpSwapBuyExactQuoteInEvent(e) => match cpi_log_event {
+            TxEvent::PumpSwapBuyEvent(cpie) => {
                 e.timestamp = cpie.timestamp;
                 e.min_base_amount_out = cpie.min_base_amount_out;
                 e.actual_base_amount_out = cpie.base_amount_out;
@@ -197,8 +197,8 @@ pub fn merge(instruction_event: &mut DexEvent, cpi_log_event: DexEvent) {
             }
             _ => {}
         },
-        DexEvent::PumpSwapSellEvent(e) => match cpi_log_event {
-            DexEvent::PumpSwapSellEvent(cpie) => {
+        TxEvent::PumpSwapSellEvent(e) => match cpi_log_event {
+            TxEvent::PumpSwapSellEvent(cpie) => {
                 e.timestamp = cpie.timestamp;
                 e.base_amount_in = cpie.base_amount_in;
                 e.min_quote_amount_out = cpie.min_quote_amount_out;
@@ -232,8 +232,8 @@ pub fn merge(instruction_event: &mut DexEvent, cpi_log_event: DexEvent) {
             }
             _ => {}
         },
-        DexEvent::PumpSwapCreatePoolEvent(e) => match cpi_log_event {
-            DexEvent::PumpSwapCreatePoolEvent(cpie) => {
+        TxEvent::PumpSwapCreatePoolEvent(e) => match cpi_log_event {
+            TxEvent::PumpSwapCreatePoolEvent(cpie) => {
                 e.timestamp = cpie.timestamp;
                 e.index = cpie.index;
                 e.creator = cpie.creator;
@@ -258,8 +258,8 @@ pub fn merge(instruction_event: &mut DexEvent, cpi_log_event: DexEvent) {
             }
             _ => {}
         },
-        DexEvent::PumpSwapInitBoostEvent(e) => match cpi_log_event {
-            DexEvent::PumpSwapInitBoostEvent(cpie) => {
+        TxEvent::PumpSwapInitBoostEvent(e) => match cpi_log_event {
+            TxEvent::PumpSwapInitBoostEvent(cpie) => {
                 e.timestamp = cpie.timestamp;
                 e.mint = cpie.mint;
                 e.bonding_curve = cpie.bonding_curve;
@@ -269,8 +269,8 @@ pub fn merge(instruction_event: &mut DexEvent, cpi_log_event: DexEvent) {
             }
             _ => {}
         },
-        DexEvent::PumpSwapDepositEvent(e) => match cpi_log_event {
-            DexEvent::PumpSwapDepositEvent(cpie) => {
+        TxEvent::PumpSwapDepositEvent(e) => match cpi_log_event {
+            TxEvent::PumpSwapDepositEvent(cpie) => {
                 e.timestamp = cpie.timestamp;
                 e.lp_token_amount_out = cpie.lp_token_amount_out;
                 e.max_base_amount_in = cpie.max_base_amount_in;
@@ -290,8 +290,8 @@ pub fn merge(instruction_event: &mut DexEvent, cpi_log_event: DexEvent) {
             }
             _ => {}
         },
-        DexEvent::PumpSwapWithdrawEvent(e) => match cpi_log_event {
-            DexEvent::PumpSwapWithdrawEvent(cpie) => {
+        TxEvent::PumpSwapWithdrawEvent(e) => match cpi_log_event {
+            TxEvent::PumpSwapWithdrawEvent(cpie) => {
                 e.timestamp = cpie.timestamp;
                 e.lp_token_amount_in = cpie.lp_token_amount_in;
                 e.min_base_amount_out = cpie.min_base_amount_out;
@@ -311,8 +311,8 @@ pub fn merge(instruction_event: &mut DexEvent, cpi_log_event: DexEvent) {
             }
             _ => {}
         },
-        DexEvent::MeteoraDlmmSwapEvent(e) => match cpi_log_event {
-            DexEvent::MeteoraDlmmSwapEvent(cpie) => {
+        TxEvent::MeteoraDlmmSwapEvent(e) => match cpi_log_event {
+            TxEvent::MeteoraDlmmSwapEvent(cpie) => {
                 e.lb_pair = cpie.lb_pair;
                 e.from = cpie.from;
                 e.start_bin_id = cpie.start_bin_id;
@@ -325,7 +325,7 @@ pub fn merge(instruction_event: &mut DexEvent, cpi_log_event: DexEvent) {
                 e.fee_bps = cpie.fee_bps;
                 e.host_fee = cpie.host_fee;
             }
-            DexEvent::MeteoraDlmmSwap2Event(cpie) => {
+            TxEvent::MeteoraDlmmSwap2Event(cpie) => {
                 e.lb_pair = cpie.lb_pair;
                 e.from = cpie.from;
                 e.start_bin_id = cpie.start_bin_id;
@@ -340,8 +340,8 @@ pub fn merge(instruction_event: &mut DexEvent, cpi_log_event: DexEvent) {
             }
             _ => {}
         },
-        DexEvent::MeteoraDlmmSwap2Event(e) => match cpi_log_event {
-            DexEvent::MeteoraDlmmSwap2Event(cpie) => {
+        TxEvent::MeteoraDlmmSwap2Event(e) => match cpi_log_event {
+            TxEvent::MeteoraDlmmSwap2Event(cpie) => {
                 e.lb_pair = cpie.lb_pair;
                 e.from = cpie.from;
                 e.start_bin_id = cpie.start_bin_id;
@@ -350,7 +350,7 @@ pub fn merge(instruction_event: &mut DexEvent, cpi_log_event: DexEvent) {
                 e.fee_bps = cpie.fee_bps;
                 e.swap_result = cpie.swap_result;
             }
-            DexEvent::MeteoraDlmmSwapEvent(cpie) => {
+            TxEvent::MeteoraDlmmSwapEvent(cpie) => {
                 e.lb_pair = cpie.lb_pair;
                 e.from = cpie.from;
                 e.start_bin_id = cpie.start_bin_id;
@@ -371,8 +371,8 @@ pub fn merge(instruction_event: &mut DexEvent, cpi_log_event: DexEvent) {
             }
             _ => {}
         },
-        DexEvent::MeteoraDammV2SwapEvent(e) => match cpi_log_event {
-            DexEvent::MeteoraDammV2SwapEvent(cpie) => {
+        TxEvent::MeteoraDammV2SwapEvent(e) => match cpi_log_event {
+            TxEvent::MeteoraDammV2SwapEvent(cpie) => {
                 e.pool = cpie.pool;
                 e.trade_direction = cpie.trade_direction;
                 e.collect_fee_mode = cpie.collect_fee_mode;
@@ -398,8 +398,8 @@ pub fn merge(instruction_event: &mut DexEvent, cpi_log_event: DexEvent) {
             }
             _ => {}
         },
-        DexEvent::MeteoraDammV2Swap2Event(e) => match cpi_log_event {
-            DexEvent::MeteoraDammV2SwapEvent(cpie) => {
+        TxEvent::MeteoraDammV2Swap2Event(e) => match cpi_log_event {
+            TxEvent::MeteoraDammV2SwapEvent(cpie) => {
                 e.pool = cpie.pool;
                 e.trade_direction = cpie.trade_direction;
                 e.collect_fee_mode = cpie.collect_fee_mode;
@@ -425,8 +425,8 @@ pub fn merge(instruction_event: &mut DexEvent, cpi_log_event: DexEvent) {
             }
             _ => {}
         },
-        DexEvent::MeteoraDammV2InitializePoolEvent(e) => match cpi_log_event {
-            DexEvent::MeteoraDammV2InitializePoolEvent(cpie) => {
+        TxEvent::MeteoraDammV2InitializePoolEvent(e) => match cpi_log_event {
+            TxEvent::MeteoraDammV2InitializePoolEvent(cpie) => {
                 e.pool = cpie.pool;
                 e.token_a_mint = cpie.token_a_mint;
                 e.token_b_mint = cpie.token_b_mint;
@@ -451,8 +451,8 @@ pub fn merge(instruction_event: &mut DexEvent, cpi_log_event: DexEvent) {
             }
             _ => {}
         },
-        DexEvent::MeteoraDammV2InitializeCustomizablePoolEvent(e) => match cpi_log_event {
-            DexEvent::MeteoraDammV2InitializePoolEvent(cpie) => {
+        TxEvent::MeteoraDammV2InitializeCustomizablePoolEvent(e) => match cpi_log_event {
+            TxEvent::MeteoraDammV2InitializePoolEvent(cpie) => {
                 e.pool = cpie.pool;
                 e.token_a_mint = cpie.token_a_mint;
                 e.token_b_mint = cpie.token_b_mint;
@@ -477,8 +477,8 @@ pub fn merge(instruction_event: &mut DexEvent, cpi_log_event: DexEvent) {
             }
             _ => {}
         },
-        DexEvent::MeteoraDammV2InitializePoolWithDynamicConfigEvent(e) => match cpi_log_event {
-            DexEvent::MeteoraDammV2InitializePoolEvent(cpie) => {
+        TxEvent::MeteoraDammV2InitializePoolWithDynamicConfigEvent(e) => match cpi_log_event {
+            TxEvent::MeteoraDammV2InitializePoolEvent(cpie) => {
                 e.pool = cpie.pool;
                 e.token_a_mint = cpie.token_a_mint;
                 e.token_b_mint = cpie.token_b_mint;
@@ -503,8 +503,8 @@ pub fn merge(instruction_event: &mut DexEvent, cpi_log_event: DexEvent) {
             }
             _ => {}
         },
-        DexEvent::MeteoraDammV2LiquidityChangeEvent(e) => match cpi_log_event {
-            DexEvent::MeteoraDammV2LiquidityChangeEvent(cpie) => {
+        TxEvent::MeteoraDammV2LiquidityChangeEvent(e) => match cpi_log_event {
+            TxEvent::MeteoraDammV2LiquidityChangeEvent(cpie) => {
                 e.pool = cpie.pool;
                 e.position = cpie.position;
                 e.owner = cpie.owner;

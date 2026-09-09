@@ -1,39 +1,37 @@
 use crate::common::AnyResult;
-use crate::streaming::common::{
-    process_grpc_transaction, process_grpc_tx_events, MetricsManager, PerformanceMetrics,
-    StreamClientConfig, SubscriptionHandle,
+use crate::streaming::{
+    common::{
+        event_queue::QueueSender, OwnedStreamEvent, PerformanceMetrics, QueueConfig, QueuedStream,
+        StreamClientConfig, SubscriptionHandle,
+    },
+    event_parser::{
+        protocols::block::block_meta_event::BlockMetaEvent, AccountFrame, AccountView, ParsePlan,
+        TxFrame, TxParser, TxView,
+    },
+    grpc::{SubscriptionManager, TransactionPretty},
 };
-use crate::streaming::event_parser::common::filter::EventTypeFilter;
-use crate::streaming::event_parser::{DexEvent, Protocol, TxDexEvents};
-use crate::streaming::grpc::{
-    AccountPretty, BlockMetaPretty, EventPretty, SubscriptionManager, TransactionPretty,
+use anyhow::{anyhow, ensure};
+use futures::{FutureExt, SinkExt, StreamExt};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex as SyncMutex},
+    time::Instant,
 };
-use anyhow::anyhow;
-use chrono::Local;
-use futures::channel::mpsc;
-use futures::{SinkExt, StreamExt};
-use log::error;
-use solana_sdk::pubkey::Pubkey;
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use tokio::sync::Mutex;
-use yellowstone_grpc_proto::geyser::subscribe_update::UpdateOneof;
+use tokio::sync::{mpsc, oneshot, Mutex};
+use yellowstone_grpc_client::{GeyserStream, SubscribeRequestSink};
 use yellowstone_grpc_proto::geyser::{
-    CommitmentLevel, CuckooFilter, SubscribeRequest, SubscribeRequestFilterAccountsFilter,
+    subscribe_update::UpdateOneof, CommitmentLevel, CuckooFilter, SubscribeRequest,
+    SubscribeRequestFilterAccountsFilter, SubscribeRequestFilterBlocksMeta,
     SubscribeRequestFilterSlots, SubscribeRequestPing, SubscribeUpdateSlot,
 };
 
-/// 交易过滤器
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct TransactionFilter {
     pub account_include: Vec<String>,
     pub account_exclude: Vec<String>,
     pub account_required: Vec<String>,
 }
-
-/// 账户过滤器
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct AccountFilter {
     pub account: Vec<String>,
     pub owner: Vec<String>,
@@ -41,523 +39,417 @@ pub struct AccountFilter {
     pub cuckoo_accounts_filter: Option<CuckooFilter>,
 }
 
+#[derive(Clone, Debug)]
+pub struct SubscriptionRequest {
+    pub plan: ParsePlan,
+    pub transactions: Vec<TransactionFilter>,
+    pub accounts: Vec<AccountFilter>,
+    pub slots: Option<SubscribeRequestFilterSlots>,
+    pub blocks_meta: bool,
+    pub include_failed_transactions: bool,
+    pub commitment: CommitmentLevel,
+}
+impl SubscriptionRequest {
+    pub fn new(plan: ParsePlan) -> Self {
+        Self {
+            plan,
+            transactions: Vec::new(),
+            accounts: Vec::new(),
+            slots: None,
+            blocks_meta: false,
+            include_failed_transactions: false,
+            commitment: CommitmentLevel::Processed,
+        }
+    }
+    fn wire_request(&self, manager: &SubscriptionManager) -> SubscribeRequest {
+        let mut transactions = manager
+            .get_subscribe_request_filter(self.transactions.clone(), None)
+            .unwrap_or_default();
+        if self.include_failed_transactions {
+            for filter in transactions.values_mut() {
+                filter.failed = None;
+            }
+        }
+        SubscribeRequest {
+            transactions,
+            accounts: manager
+                .subscribe_with_account_request(self.accounts.clone(), None)
+                .unwrap_or_default(),
+            slots: self
+                .slots
+                .clone()
+                .map(|filter| HashMap::from([("slots".into(), filter)]))
+                .unwrap_or_default(),
+            blocks_meta: if self.blocks_meta {
+                HashMap::from([("blocks".into(), SubscribeRequestFilterBlocksMeta {})])
+            } else {
+                HashMap::new()
+            },
+            commitment: Some(self.commitment as i32),
+            ..SubscribeRequest::default()
+        }
+    }
+}
+
+/// Synchronous borrowed delivery. Keep callbacks short; use `subscribe_queued` for I/O.
+#[derive(Clone, Copy, Debug)]
+pub enum StreamEvent<'a> {
+    Transaction(TxView<'a>),
+    Account(AccountView<'a>),
+    BlockMeta(&'a BlockMetaEvent),
+    Slot(&'a SubscribeUpdateSlot),
+}
+
+struct Control {
+    request: SubscriptionRequest,
+    wire: SubscribeRequest,
+    ack: oneshot::Sender<Result<(), String>>,
+}
+
+#[derive(Clone)]
 pub struct YellowstoneGrpc {
     pub endpoint: String,
     pub x_token: Option<String>,
     pub config: StreamClientConfig,
     pub subscription_manager: SubscriptionManager,
     pub subscription_handle: Arc<Mutex<Option<SubscriptionHandle>>>,
-    // Dynamic subscription management fields
-    pub active_subscription: Arc<AtomicBool>,
-    pub control_tx: Arc<tokio::sync::Mutex<Option<mpsc::Sender<SubscribeRequest>>>>,
-    pub current_request: Arc<tokio::sync::RwLock<Option<SubscribeRequest>>>,
-
-    pub event_type_filter: Arc<tokio::sync::RwLock<Option<EventTypeFilter>>>,
+    control: Arc<Mutex<Option<mpsc::Sender<Control>>>>,
+    metrics: Arc<SyncMutex<PerformanceMetrics>>,
+    failure: Arc<SyncMutex<Option<String>>>,
 }
-
 impl YellowstoneGrpc {
-    /// 创建客户端，使用默认配置
     pub fn new(endpoint: String, x_token: Option<String>) -> AnyResult<Self> {
         Self::new_with_config(endpoint, x_token, StreamClientConfig::default())
     }
-
-    /// 创建客户端，使用自定义配置
     pub fn new_with_config(
         endpoint: String,
         x_token: Option<String>,
         config: StreamClientConfig,
     ) -> AnyResult<Self> {
-        let _ = rustls::crypto::ring::default_provider().install_default().ok();
-        let subscription_manager =
-            SubscriptionManager::new(endpoint.clone(), x_token.clone(), config.clone());
-        MetricsManager::init(config.enable_metrics);
-
+        let _ = rustls::crypto::ring::default_provider().install_default();
         Ok(Self {
+            subscription_manager: SubscriptionManager::new(
+                endpoint.clone(),
+                x_token.clone(),
+                config.clone(),
+            ),
             endpoint,
             x_token,
             config,
-            subscription_manager,
             subscription_handle: Arc::new(Mutex::new(None)),
-            active_subscription: Arc::new(AtomicBool::new(false)),
-            control_tx: Arc::new(tokio::sync::Mutex::new(None)),
-            current_request: Arc::new(tokio::sync::RwLock::new(None)),
-            event_type_filter: Arc::new(tokio::sync::RwLock::new(None)),
+            control: Arc::new(Mutex::new(None)),
+            metrics: Arc::new(SyncMutex::new(PerformanceMetrics::default())),
+            failure: Arc::new(SyncMutex::new(None)),
         })
     }
-
-    /// 获取配置
+    pub fn get_metrics(&self) -> PerformanceMetrics {
+        self.metrics.lock().unwrap().clone()
+    }
+    pub fn print_metrics(&self) {
+        log::info!("stream metrics: {:?}", self.get_metrics());
+    }
+    pub fn last_error(&self) -> Option<String> {
+        self.failure.lock().unwrap().clone()
+    }
     pub fn get_config(&self) -> &StreamClientConfig {
         &self.config
     }
 
-    /// 更新配置
-    pub fn update_config(&mut self, config: StreamClientConfig) {
-        self.config = config;
-    }
-
-    /// 获取性能指标
-    pub fn get_metrics(&self) -> PerformanceMetrics {
-        MetricsManager::global().get_metrics()
-    }
-
-    /// 打印性能指标
-    pub fn print_metrics(&self) {
-        MetricsManager::global().print_metrics();
-    }
-
-    /// 启用或禁用性能监控
-    pub fn set_enable_metrics(&mut self, enabled: bool) {
-        self.config.enable_metrics = enabled;
-    }
-
-    /// 停止当前订阅
-    pub async fn stop(&self) {
-        let mut handle_guard = self.subscription_handle.lock().await;
-        if let Some(handle) = handle_guard.take() {
-            handle.stop();
-        }
-        *self.control_tx.lock().await = None;
-        *self.current_request.write().await = None;
-        self.active_subscription.store(false, Ordering::Release);
-    }
-
-    /// Simplified immediate event subscription (recommended for simple scenarios)
-    ///
-    /// # Parameters
-    /// * `protocols` - List of protocols to monitor
-    /// * `bot_wallet` - Optional bot wallet address for filtering related transactions
-    /// * `transaction_filter` - Transaction filter specifying accounts to include/exclude
-    /// * `account_filter` - Account filter specifying accounts and owners to monitor
-    /// * `event_filter` - Optional event filter for further event filtering, no filtering if None
-    /// * `commitment` - Optional commitment level, defaults to Confirmed
-    /// * `callback` - Event callback function that receives parsed unified events
-    ///
-    /// # Returns
-    /// Returns `AnyResult<()>`, `Ok(())` on success, error information on failure
-    pub async fn subscribe_events_immediate<F>(
-        &self,
-        protocols: Vec<Protocol>,
-        bot_wallet: Option<Pubkey>,
-        transaction_filter: Vec<TransactionFilter>,
-        account_filter: Vec<AccountFilter>,
-        event_type_filter: Option<EventTypeFilter>,
-        commitment: Option<CommitmentLevel>,
-        callback: F,
-    ) -> AnyResult<()>
+    pub async fn subscribe<F>(&self, request: SubscriptionRequest, callback: F) -> AnyResult<()>
     where
-        F: Fn(DexEvent) + Send + Sync + 'static,
+        F: for<'a> FnMut(StreamEvent<'a>) + Send + 'static,
     {
-        self.subscribe_events_immediate_inner(
-            protocols,
-            bot_wallet,
-            transaction_filter,
-            account_filter,
-            event_type_filter,
-            commitment,
-            None,
-            callback,
-            |_| {},
-        )
-        .await
+        self.start(request, BorrowedDelivery(callback)).await
     }
-
-    /// Subscribe to parsed events and processed slot updates on one Yellowstone stream.
-    #[allow(clippy::too_many_arguments)]
-    pub async fn subscribe_events_and_slots_immediate<F, S>(
+    pub async fn subscribe_queued(
         &self,
-        protocols: Vec<Protocol>,
-        bot_wallet: Option<Pubkey>,
-        transaction_filter: Vec<TransactionFilter>,
-        account_filter: Vec<AccountFilter>,
-        event_type_filter: Option<EventTypeFilter>,
-        commitment: Option<CommitmentLevel>,
-        slot_filter: SubscribeRequestFilterSlots,
-        callback: F,
-        slot_callback: S,
-    ) -> AnyResult<()>
-    where
-        F: Fn(DexEvent) + Send + Sync + 'static,
-        S: Fn(SubscribeUpdateSlot) + Send + Sync + 'static,
-    {
-        self.subscribe_events_immediate_inner(
-            protocols,
-            bot_wallet,
-            transaction_filter,
-            account_filter,
-            event_type_filter,
-            commitment,
-            Some(HashMap::from([("slots".to_owned(), slot_filter)])),
-            callback,
-            slot_callback,
-        )
-        .await
+        request: SubscriptionRequest,
+        queue: QueueConfig,
+    ) -> AnyResult<QueuedStream> {
+        let (sender, stream) = QueueSender::channel(queue)?;
+        self.start(request, sender).await?;
+        Ok(stream)
     }
-
-    #[allow(clippy::too_many_arguments)]
-    async fn subscribe_events_immediate_inner<F, S>(
+    async fn start<D: Delivery>(
         &self,
-        protocols: Vec<Protocol>,
-        bot_wallet: Option<Pubkey>,
-        transaction_filter: Vec<TransactionFilter>,
-        account_filter: Vec<AccountFilter>,
-        event_type_filter: Option<EventTypeFilter>,
-        commitment: Option<CommitmentLevel>,
-        slots: Option<HashMap<String, SubscribeRequestFilterSlots>>,
-        callback: F,
-        slot_callback: S,
-    ) -> AnyResult<()>
-    where
-        F: Fn(DexEvent) + Send + Sync + 'static,
-        S: Fn(SubscribeUpdateSlot) + Send + Sync + 'static,
-    {
-        *self.event_type_filter.write().await = event_type_filter.clone();
-        if self
-            .active_subscription
-            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-            .is_err()
-        {
-            return Err(anyhow!("Already subscribed. Use update_subscription() to modify filters"));
-        }
-
-        let mut metrics_handle = None;
-        // 启动自动性能监控（如果启用）
-        if self.config.enable_metrics {
-            metrics_handle = MetricsManager::global().start_auto_monitoring().await;
-        }
-
-        let transactions = self
-            .subscription_manager
-            .get_subscribe_request_filter(transaction_filter, event_type_filter.as_ref());
-        let accounts = self
-            .subscription_manager
-            .subscribe_with_account_request(account_filter, event_type_filter.as_ref());
-
-        // 订阅事件
-        let (subscribe_tx, mut stream, subscribe_request) = self
-            .subscription_manager
-            .subscribe_with_request_and_slots(
-                transactions,
-                accounts,
-                slots,
-                commitment,
-                event_type_filter.as_ref(),
-            )
-            .await?;
-
-        // 用 Arc<Mutex<>> 包装 subscribe_tx 以支持多线程共享
-        let subscribe_tx = Arc::new(Mutex::new(subscribe_tx));
-        *self.current_request.write().await = Some(subscribe_request);
-        let (control_tx, mut control_rx) = mpsc::channel(100);
-        *self.control_tx.lock().await = Some(control_tx);
-
-        // Wrap callback once before the async block
-        let callback = Arc::new(callback);
-        let slot_callback = Arc::new(slot_callback);
-        let swap_cu_parse_config = self.config.swap_cu_parse_config.clone();
-
-        let stream_handle = tokio::spawn(async move {
-            loop {
-                tokio::select! {
-                    message = stream.next() => {
-                        match message {
-                            Some(Ok(msg)) => {
-                                let created_at = msg.created_at;
-                                match msg.update_oneof {
-                                    Some(UpdateOneof::Account(account)) => {
-                                        let account_pretty = AccountPretty::from(account);
-                                        log::debug!("Received account: {:?}", account_pretty);
-                                        if let Err(e) = process_grpc_transaction(
-                                            EventPretty::Account(account_pretty),
-                                            &protocols,
-                                            event_type_filter.as_ref(),
-                                            swap_cu_parse_config.as_ref(),
-                                            callback.clone(),
-                                            bot_wallet,
-                                        )
-                                        .await
-                                        {
-                                            error!("Error processing account event: {e:?}");
-                                        }
-                                    }
-                                    Some(UpdateOneof::BlockMeta(sut)) => {
-                                        let block_meta_pretty = BlockMetaPretty::from((sut, created_at));
-                                        log::debug!("Received block meta: {:?}", block_meta_pretty);
-                                        if let Err(e) = process_grpc_transaction(
-                                            EventPretty::BlockMeta(block_meta_pretty),
-                                            &protocols,
-                                            event_type_filter.as_ref(),
-                                            swap_cu_parse_config.as_ref(),
-                                            callback.clone(),
-                                            bot_wallet,
-                                        )
-                                        .await
-                                        {
-                                            error!("Error processing block meta event: {e:?}");
-                                        }
-                                    }
-                                    Some(UpdateOneof::Transaction(sut)) => {
-                                        let transaction_pretty = TransactionPretty::from((sut, created_at));
-                                        log::debug!(
-                                            "Received transaction: {} at slot {}",
-                                            transaction_pretty.signature,
-                                            transaction_pretty.slot
-                                        );
-                                        if let Err(e) = process_grpc_transaction(
-                                            EventPretty::Transaction(transaction_pretty),
-                                            &protocols,
-                                            event_type_filter.as_ref(),
-                                            swap_cu_parse_config.as_ref(),
-                                            callback.clone(),
-                                            bot_wallet,
-                                        )
-                                        .await
-                                        {
-                                            error!("Error processing transaction event: {e:?}");
-                                        }
-                                    }
-                                    Some(UpdateOneof::Slot(slot)) => {
-                                        slot_callback(slot);
-                                    }
-                                    Some(UpdateOneof::Ping(_)) => {
-                                        // 只在需要时获取锁，并立即释放
-                                        if let Ok(mut tx_guard) = subscribe_tx.try_lock() {
-                                            let _ = tx_guard
-                                                .send(SubscribeRequest {
-                                                    ping: Some(SubscribeRequestPing { id: 1 }),
-                                                    ..Default::default()
-                                                })
-                                                .await;
-                                        }
-                                        log::debug!("service is ping: {}", Local::now());
-                                    }
-                                    Some(UpdateOneof::Pong(_)) => {
-                                        log::debug!("service is pong: {}", Local::now());
-                                    }
-                                    _ => {
-                                        log::debug!("Received other message type");
-                                    }
-                                }
-                            }
-                            Some(Err(error)) => {
-                                error!("Stream error: {error:?}");
-                                break;
-                            }
-                            None => break,
-                        }
-                    }
-                    Some(update) = control_rx.next() => {
-                        if let Err(e) = subscribe_tx.lock().await.send(update).await {
-                            error!("Failed to send subscription update: {}", e);
-                            break;
-                        }
-                    }
-                }
-            }
-        });
-
-        // 保存订阅句柄
-        let subscription_handle = SubscriptionHandle::new(stream_handle, None, metrics_handle);
-        let mut handle_guard = self.subscription_handle.lock().await;
-        *handle_guard = Some(subscription_handle);
-
-        Ok(())
-    }
-
-    /// Transaction-level event subscription.
-    ///
-    /// The callback receives all parsed DEX events for one transaction in parser order.
-    #[allow(clippy::too_many_arguments)]
-    pub async fn subscribe_tx_events_immediate<F>(
-        &self,
-        protocols: Vec<Protocol>,
-        bot_wallet: Option<Pubkey>,
-        transaction_filter: Vec<TransactionFilter>,
-        event_type_filter: Option<EventTypeFilter>,
-        commitment: Option<CommitmentLevel>,
-        callback: F,
-    ) -> AnyResult<()>
-    where
-        F: Fn(TxDexEvents) + Send + Sync + 'static,
-    {
-        *self.event_type_filter.write().await = event_type_filter.clone();
-        if self
-            .active_subscription
-            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-            .is_err()
-        {
-            return Err(anyhow!("Already subscribed. Use update_subscription() to modify filters"));
-        }
-
-        let mut metrics_handle = None;
-        if self.config.enable_metrics {
-            metrics_handle = MetricsManager::global().start_auto_monitoring().await;
-        }
-
-        let transactions = self
-            .subscription_manager
-            .get_subscribe_request_filter(transaction_filter, event_type_filter.as_ref());
-        let accounts = None;
-
-        let (subscribe_tx, mut stream, subscribe_request) = self
-            .subscription_manager
-            .subscribe_with_request(transactions, accounts, commitment, event_type_filter.as_ref())
-            .await?;
-
-        let subscribe_tx = Arc::new(Mutex::new(subscribe_tx));
-        *self.current_request.write().await = Some(subscribe_request);
-        let (control_tx, mut control_rx) = mpsc::channel(100);
-        *self.control_tx.lock().await = Some(control_tx);
-
-        let callback = Arc::new(callback);
-        let swap_cu_parse_config = self.config.swap_cu_parse_config.clone();
-        let tx_exec_meta_audit = self.config.tx_exec_meta_audit;
-
-        let stream_handle = tokio::spawn(async move {
-            loop {
-                tokio::select! {
-                    message = stream.next() => {
-                        match message {
-                            Some(Ok(msg)) => {
-                                let created_at = msg.created_at;
-                                match msg.update_oneof {
-                                    Some(UpdateOneof::Transaction(sut)) => {
-                                        let transaction_pretty = TransactionPretty::from((sut, created_at));
-                                        log::debug!(
-                                            "Received tx events transaction: {} at slot {}",
-                                            transaction_pretty.signature,
-                                            transaction_pretty.slot
-                                        );
-                                        if let Err(e) = process_grpc_tx_events(
-                                            EventPretty::Transaction(transaction_pretty),
-                                            &protocols,
-                                            event_type_filter.as_ref(),
-                                            swap_cu_parse_config.as_ref(),
-                                            tx_exec_meta_audit,
-                                            callback.clone(),
-                                            bot_wallet,
-                                        )
-                                        .await
-                                        {
-                                            error!("Error processing tx events: {e:?}");
-                                        }
-                                    }
-                                    Some(UpdateOneof::Ping(_)) => {
-                                        if let Ok(mut tx_guard) = subscribe_tx.try_lock() {
-                                            let _ = tx_guard
-                                                .send(SubscribeRequest {
-                                                    ping: Some(SubscribeRequestPing { id: 1 }),
-                                                    ..Default::default()
-                                                })
-                                                .await;
-                                        }
-                                        log::debug!("service is ping: {}", Local::now());
-                                    }
-                                    Some(UpdateOneof::Pong(_)) => {
-                                        log::debug!("service is pong: {}", Local::now());
-                                    }
-                                    _ => {
-                                        log::debug!("Received non-transaction message in tx event subscription");
-                                    }
-                                }
-                            }
-                            Some(Err(error)) => {
-                                error!("Stream error: {error:?}");
-                                break;
-                            }
-                            None => break,
-                        }
-                    }
-                    Some(update) = control_rx.next() => {
-                        if let Err(e) = subscribe_tx.lock().await.send(update).await {
-                            error!("Failed to send subscription update: {}", e);
-                            break;
-                        }
-                    }
-                }
-            }
-        });
-
-        let subscription_handle = SubscriptionHandle::new(stream_handle, None, metrics_handle);
-        let mut handle_guard = self.subscription_handle.lock().await;
-        *handle_guard = Some(subscription_handle);
-
-        Ok(())
-    }
-
-    /// Update subscription filters at runtime without reconnection
-    ///
-    /// # Parameters
-    /// * `transaction_filter` - New transaction filter to apply
-    /// * `account_filter` - New account filter to apply
-    ///
-    /// # Returns
-    /// Returns `AnyResult<()>` on success, error on failure
-    pub async fn update_subscription(
-        &self,
-        transaction_filter: Vec<TransactionFilter>,
-        account_filter: Vec<AccountFilter>,
+        request: SubscriptionRequest,
+        mut delivery: D,
     ) -> AnyResult<()> {
-        let mut control_sender = {
-            let control_guard = self.control_tx.lock().await;
-
-            if !self.active_subscription.load(Ordering::Acquire) {
-                return Err(anyhow!("No active subscription to update"));
+        let mut handle = self.subscription_handle.lock().await;
+        ensure!(
+            handle.as_ref().is_none_or(SubscriptionHandle::is_finished),
+            "already subscribed; use update_subscription"
+        );
+        let wire = request.wire_request(&self.subscription_manager);
+        let mut client = self.subscription_manager.connect().await?;
+        let (sink, stream) = client.subscribe_with_request(Some(wire)).await?;
+        let (control, rx) = mpsc::channel(32);
+        let (shutdown, shutdown_rx) = oneshot::channel();
+        let metrics = self.metrics.clone();
+        let failure = self.failure.clone();
+        *failure.lock().unwrap() = None;
+        let enabled = self.config.enable_metrics;
+        let mut control_guard = self.control.lock().await;
+        let task = tokio::spawn(async move {
+            let mut delta = PerformanceMetrics::default();
+            let operation = async {
+                if enabled {
+                    run::<true, D>(
+                        sink,
+                        stream,
+                        rx,
+                        shutdown_rx,
+                        request,
+                        &mut delivery,
+                        &metrics,
+                        &mut delta,
+                    )
+                    .await
+                } else {
+                    run::<false, D>(
+                        sink,
+                        stream,
+                        rx,
+                        shutdown_rx,
+                        request,
+                        &mut delivery,
+                        &metrics,
+                        &mut delta,
+                    )
+                    .await
+                }
+            };
+            let result = std::panic::AssertUnwindSafe(operation)
+                .catch_unwind()
+                .await
+                .unwrap_or_else(|panic| {
+                    let message = panic
+                        .downcast_ref::<String>()
+                        .map(String::as_str)
+                        .or_else(|| panic.downcast_ref::<&str>().copied())
+                        .unwrap_or("unknown panic");
+                    Err(anyhow!("subscription worker panicked: {message}"))
+                });
+            if enabled {
+                metrics.lock().unwrap().merge(&mut delta);
             }
-
-            control_guard
-                .as_ref()
-                .ok_or_else(|| anyhow!("No active subscription to update"))?
-                .clone()
-        };
-
-        let mut request = self
-            .current_request
-            .read()
+            if let Err(error) = &result {
+                let error = format!("{error:#}");
+                log::error!("subscription stopped: {error}");
+                delivery.fail(&error);
+                *failure.lock().unwrap() = Some(error);
+            }
+            result
+        });
+        *control_guard = Some(control);
+        *handle = Some(SubscriptionHandle::new(task, shutdown));
+        Ok(())
+    }
+    /// Apply a complete plan between messages and send its wire filters on the same stream.
+    /// The acknowledgement confirms the send, not a server-side transaction boundary.
+    pub async fn update_subscription(&self, request: SubscriptionRequest) -> AnyResult<()> {
+        let sender =
+            self.control.lock().await.clone().ok_or_else(|| anyhow!("no active subscription"))?;
+        let wire = request.wire_request(&self.subscription_manager);
+        let (ack, response) = oneshot::channel();
+        sender
+            .send(Control { request, wire, ack })
             .await
-            .as_ref()
-            .ok_or_else(|| anyhow!("No active subscription"))?
-            .clone();
-
-        request.transactions = self
-            .subscription_manager
-            .get_subscribe_request_filter(
-                transaction_filter,
-                self.event_type_filter.read().await.as_ref(),
-            )
-            .unwrap_or_default();
-
-        request.accounts = self
-            .subscription_manager
-            .subscribe_with_account_request(
-                account_filter,
-                self.event_type_filter.read().await.as_ref(),
-            )
-            .unwrap_or_default();
-
-        control_sender
-            .send(request.clone())
+            .map_err(|_| anyhow!("subscription ended"))?;
+        response
             .await
-            .map_err(|e| anyhow!("Failed to send update: {}", e))?;
-
-        *self.current_request.write().await = Some(request);
-
+            .map_err(|_| anyhow!("subscription ended before update"))?
+            .map_err(anyhow::Error::msg)
+    }
+    /// Close production and wait for the worker. Queued consumers may drain accepted items.
+    pub async fn stop(&self) -> AnyResult<()> {
+        let mut guard = self.subscription_handle.lock().await;
+        *self.control.lock().await = None;
+        if let Some(handle) = guard.take() {
+            handle.shutdown().await?;
+        }
         Ok(())
     }
 }
 
-// 实现 Clone trait 以支持模块间共享
-impl Clone for YellowstoneGrpc {
-    fn clone(&self) -> Self {
-        Self {
-            endpoint: self.endpoint.clone(),
-            x_token: self.x_token.clone(),
-            config: self.config.clone(),
-            subscription_manager: self.subscription_manager.clone(),
-            subscription_handle: self.subscription_handle.clone(), // 共享同一个 Arc<Mutex<>>
-            active_subscription: self.active_subscription.clone(),
-            control_tx: self.control_tx.clone(),
-            event_type_filter: self.event_type_filter.clone(),
-            current_request: self.current_request.clone(),
+trait Delivery: Send + 'static {
+    const TIMED: bool;
+    fn closed(&mut self) -> impl std::future::Future<Output = anyhow::Result<()>> + Send;
+    fn transaction(
+        &mut self,
+        parser: &mut TxParser,
+        frame: TxFrame,
+        plan: &ParsePlan,
+        received: Option<Instant>,
+    ) -> anyhow::Result<usize>;
+    fn account(
+        &mut self,
+        frame: AccountFrame,
+        plan: &ParsePlan,
+        received: Option<Instant>,
+    ) -> anyhow::Result<usize>;
+    fn block(&mut self, block: BlockMetaEvent, received: Option<Instant>) -> anyhow::Result<()>;
+    fn slot(&mut self, slot: SubscribeUpdateSlot, received: Option<Instant>) -> anyhow::Result<()>;
+    fn fail(&self, _error: &str) {}
+}
+struct BorrowedDelivery<F>(F);
+impl<F> Delivery for BorrowedDelivery<F>
+where
+    F: for<'a> FnMut(StreamEvent<'a>) + Send + 'static,
+{
+    const TIMED: bool = false;
+    fn closed(&mut self) -> impl std::future::Future<Output = anyhow::Result<()>> + Send {
+        std::future::pending()
+    }
+    fn transaction(
+        &mut self,
+        parser: &mut TxParser,
+        frame: TxFrame,
+        plan: &ParsePlan,
+        _: Option<Instant>,
+    ) -> anyhow::Result<usize> {
+        let mut count = 0;
+        parser.visit(&frame, plan, |view| {
+            count = view.events.len();
+            self.0(StreamEvent::Transaction(view));
+        })?;
+        Ok(count)
+    }
+    fn account(
+        &mut self,
+        frame: AccountFrame,
+        plan: &ParsePlan,
+        _: Option<Instant>,
+    ) -> anyhow::Result<usize> {
+        if let Some(view) = frame.view(plan) {
+            self.0(StreamEvent::Account(view));
+            return Ok(1);
+        }
+        Ok(0)
+    }
+    fn block(&mut self, block: BlockMetaEvent, _: Option<Instant>) -> anyhow::Result<()> {
+        self.0(StreamEvent::BlockMeta(&block));
+        Ok(())
+    }
+    fn slot(&mut self, slot: SubscribeUpdateSlot, _: Option<Instant>) -> anyhow::Result<()> {
+        self.0(StreamEvent::Slot(&slot));
+        Ok(())
+    }
+}
+impl Delivery for QueueSender {
+    const TIMED: bool = true;
+    fn closed(&mut self) -> impl std::future::Future<Output = anyhow::Result<()>> + Send {
+        QueueSender::closed(self)
+    }
+    fn transaction(
+        &mut self,
+        parser: &mut TxParser,
+        frame: TxFrame,
+        plan: &ParsePlan,
+        received: Option<Instant>,
+    ) -> anyhow::Result<usize> {
+        if let Some(batch) = parser.parse_owned(frame, plan)? {
+            let count = batch.events.len();
+            self.send(
+                OwnedStreamEvent::Transaction(batch),
+                received.expect("queued delivery timestamp"),
+            )?;
+            return Ok(count);
+        }
+        Ok(0)
+    }
+    fn account(
+        &mut self,
+        frame: AccountFrame,
+        plan: &ParsePlan,
+        received: Option<Instant>,
+    ) -> anyhow::Result<usize> {
+        if frame.view(plan).is_some() {
+            self.send(
+                OwnedStreamEvent::Account(frame),
+                received.expect("queued delivery timestamp"),
+            )?;
+            return Ok(1);
+        }
+        Ok(0)
+    }
+    fn block(&mut self, block: BlockMetaEvent, received: Option<Instant>) -> anyhow::Result<()> {
+        self.send(OwnedStreamEvent::BlockMeta(block), received.expect("queued delivery timestamp"))
+    }
+    fn slot(&mut self, slot: SubscribeUpdateSlot, received: Option<Instant>) -> anyhow::Result<()> {
+        self.send(OwnedStreamEvent::Slot(slot), received.expect("queued delivery timestamp"))
+    }
+    fn fail(&self, error: &str) {
+        QueueSender::fail(self, error);
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run<const METRICS: bool, D: Delivery>(
+    mut sink: SubscribeRequestSink,
+    mut stream: GeyserStream,
+    mut controls: mpsc::Receiver<Control>,
+    mut shutdown: oneshot::Receiver<()>,
+    mut request: SubscriptionRequest,
+    delivery: &mut D,
+    metrics: &SyncMutex<PerformanceMetrics>,
+    delta: &mut PerformanceMetrics,
+) -> anyhow::Result<()> {
+    let mut parser = TxParser::default();
+    let mut flush = METRICS.then(|| {
+        let mut timer = tokio::time::interval(std::time::Duration::from_secs(1));
+        timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        timer
+    });
+    loop {
+        tokio::select! {
+            biased;
+            _ = &mut shutdown => return Ok(()),
+            result = delivery.closed() => return result,
+            _ = async { flush.as_mut().unwrap().tick().await }, if METRICS => metrics.lock().unwrap().merge(delta),
+            Some(control) = controls.recv() => {
+                match sink.send(control.wire).await {
+                    Ok(()) => { request = control.request; let _ = control.ack.send(Ok(())); }
+                    Err(error) => { let _ = control.ack.send(Err(error.to_string())); return Err(error.into()); }
+                }
+            }
+            message = stream.next() => {
+                let message = message.ok_or_else(|| anyhow!("gRPC stream ended"))??;
+                let received = (METRICS || D::TIMED).then(Instant::now);
+                let mut count = 0;
+                match message.update_oneof {
+                    Some(UpdateOneof::Transaction(update)) => {
+                        // Yellowstone created_at is a transport timestamp, not the block timestamp.
+                        let frame = TxFrame::try_from(TransactionPretty::try_from((update, None))?)?;
+                        count = delivery.transaction(&mut parser, frame, &request.plan, received)?;
+                        if METRICS { delta.transactions += 1; }
+                    }
+                    Some(UpdateOneof::Account(update)) => {
+                        count = delivery.account(AccountFrame::try_from(update)?, &request.plan, received)?;
+                        if METRICS { delta.accounts += 1; }
+                    }
+                    Some(UpdateOneof::BlockMeta(update)) if request.blocks_meta => {
+                        delivery.block(BlockMetaEvent { slot: update.slot, block_hash: update.blockhash,
+                            block_time_ms: update.block_time.map(|t| t.timestamp.saturating_mul(1000)),
+                            recv_us: crate::streaming::event_parser::common::high_performance_clock::get_high_perf_clock() }, received)?;
+                        if METRICS { delta.blocks += 1; }
+                    }
+                    Some(UpdateOneof::Slot(slot)) if request.slots.is_some() => delivery.slot(slot, received)?,
+                    Some(UpdateOneof::Ping(_)) => {
+                        sink.send(SubscribeRequest { ping: Some(SubscribeRequestPing { id: 1 }), ..SubscribeRequest::default() }).await?;
+                        continue;
+                    }
+                    _ => continue,
+                }
+                if METRICS {
+                    let elapsed = received.unwrap().elapsed().as_micros().min(u64::MAX as u128) as u64;
+                    delta.events += count as u64; delta.processing_us += elapsed;
+                    delta.max_processing_us = delta.max_processing_us.max(elapsed);
+                    if delta.transactions + delta.accounts + delta.blocks >= 128 {
+                        metrics.lock().unwrap().merge(delta);
+                    }
+                }
+            }
         }
     }
 }

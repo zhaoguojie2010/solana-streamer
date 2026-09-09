@@ -146,7 +146,7 @@ pub struct RaydiumCpmmAmmConfigAccountEvent {
     pub rent_epoch: u64,
     #[borsh(skip)]
     #[serde(skip)]
-    pub raw_account_data: Vec<u8>,
+    pub raw_account_data: bytes::Bytes,
     pub amm_config: AmmConfig,
 }
 
@@ -162,7 +162,7 @@ pub struct RaydiumCpmmPoolStateAccountEvent {
     pub rent_epoch: u64,
     #[borsh(skip)]
     #[serde(skip)]
-    pub raw_account_data: Vec<u8>,
+    pub raw_account_data: bytes::Bytes,
     pub pool_state: PoolState,
 }
 

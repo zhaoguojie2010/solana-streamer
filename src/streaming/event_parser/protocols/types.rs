@@ -10,7 +10,7 @@ use anyhow::{anyhow, Result};
 use solana_sdk::pubkey::Pubkey;
 
 /// 支持的协议
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Protocol {
     PancakeSwap,
     PumpSwap,
@@ -70,7 +70,7 @@ impl std::str::FromStr for Protocol {
             "raydiumcpmm" => Ok(Protocol::RaydiumCpmm),
             "raydiumclmm" => Ok(Protocol::RaydiumClmm),
             "raydiumammv4" => Ok(Protocol::RaydiumAmmV4),
-            "meteoradamm_v2" => Ok(Protocol::MeteoraDammV2),
+            "meteoradamm_v2" | "meteoradammv2" | "meteora_damm_v2" => Ok(Protocol::MeteoraDammV2),
             "meteoradlmm" => Ok(Protocol::MeteoraDlmm),
             "whirlpool" => Ok(Protocol::Whirlpool),
             _ => Err(anyhow!("Unsupported protocol: {}", s)),

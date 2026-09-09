@@ -86,10 +86,9 @@
 - **批处理优化**: 批量处理事件以减少回调开销
 - **性能监控**: 内置性能指标监控，包括事件处理速度
 - **内存优化**: 移动事件所有权、共享交易公钥表、借用 CPI 指令缓冲区，减少拷贝与内存分配
-- **灵活配置系统**: 支持自定义批处理大小、背压策略、通道大小等参数
-- **预设配置**: 提供高吞吐量、低延迟等预设配置，针对不同使用场景优化
-- **背压处理**: 支持阻塞、丢弃等背压策略
-- **运行时配置更新**: 支持在运行时动态更新配置参数
+- **按需解析**: 通过 ParsePlan 选择输出和可选解析，默认跳过日志与审计开销
+- **有界交付**: 限制队列数量、计费字节和交付年龄，超限显式失败
+- **运行时更新**: 在消息间替换完整订阅与解析计划
 - **优雅关闭**: 支持编程式 stop() 方法进行干净的关闭
 
 ## ⚡ 安装
@@ -117,34 +116,21 @@ solana-streamer-sdk = { path = "./solana-streamer", version = "1.1.5" }
 solana-streamer-sdk = "1.1.5"
 ```
 
+### RPC 为可选功能
+
+默认构建提供 gRPC 订阅与同步解析，不启用 Solana HTTP RPC。需要适配已有 RPC 响应时开启 `rpc`；需要按签名查询历史交易时开启 `rpc-client`（包含 `rpc`）：
+
+```toml
+solana-streamer-sdk = { path = "./solana-streamer", features = ["rpc-client"] }
+```
+
+适配入口为 `solana_streamer_sdk::rpc::transaction_frame`，HTTP 客户端由调用方使用。默认 `cargo build --examples` 编译 19 个流式示例；加 `--features rpc-client` 编译全部 20 个示例。
+
 ## 🔄 迁移指南
 
-### 从 v0.5.x 迁移到 v1.x.x
+当前仓库引入未发布的批次接口变更：`TxEvent` 与 `AccountEvent` 分离，公共元数据移到 `TxBatch.meta`，同步消费使用 `TxView`，异步消费使用有界队列。旧的 `DexEvent`、`TxDexEvents`、逐事件回调和对象池接口已移除。
 
-版本 1.0.0 引入了从基于 trait 的事件处理到基于 enum 的事件的重大架构变更。这提供了更好的类型安全性、改进的性能和更简单的代码模式。
-
-**主要变更：**
-
-1. **事件类型变更** - `Box<dyn UnifiedEvent>` → `DexEvent` 枚举
-2. **回调签名** - 回调现在接收具体的 `DexEvent` 而不是 trait 对象
-3. **事件匹配** - 使用标准 Rust `match` 而不是 `match_event!` 宏
-4. **元数据访问** - 事件属性现在通过 `.metadata()` 方法访问
-
-详细的迁移步骤和代码示例，请参阅 [MIGRATION.md](MIGRATION.md) 或 [MIGRATION_CN.md](MIGRATION_CN.md)（中文版本）。
-
-**快速迁移示例：**
-
-```rust
-// 旧版 (v0.5.x)
-let callback = |event: Box<dyn UnifiedEvent>| {
-    println!("Event: {:?}", event.event_type());
-};
-
-// 新版 (v1.x.x)
-let callback = |event: DexEvent| {
-    println!("Event: {:?}", event.metadata().event_type);
-};
-```
+请使用当前仓库的 git/path 依赖，并按[中文迁移指南](MIGRATION_CN.md)调整使用方；发布版本应参考其对应文档。
 
 ## ⚙️ 配置系统
 
@@ -180,7 +166,7 @@ let grpc = YellowstoneGrpc::new_with_config(endpoint, token, config)?;
 | 描述 | 运行命令 | 源码路径 |
 |------|---------|----------|
 | 使用 Yellowstone gRPC 监控交易事件 | `cargo run --example grpc_example` | [examples/grpc_example.rs](examples/grpc_example.rs) |
-| 解析 Solana 主网交易数据 | `cargo run --example parse_tx_events` | [examples/parse_tx_events.rs](examples/parse_tx_events.rs) |
+| 解析 Solana 主网交易数据 | `cargo run --features rpc-client --example parse_tx_events -- <signature>` | [examples/parse_tx_events.rs](examples/parse_tx_events.rs) |
 | 监控 PancakeSwap V3 交换事件（Swap/SwapV2） | `cargo run --example pancakeswap_swap_with_logs` | [examples/pancakeswap_swap_with_logs.rs](examples/pancakeswap_swap_with_logs.rs) |
 | 运行时更新过滤器 | `cargo run --example dynamic_subscription` | [examples/dynamic_subscription.rs](examples/dynamic_subscription.rs) |
 | 监控特定代币账户余额变化 | `cargo run --example token_balance_listen_example` | [examples/token_balance_listen_example.rs](examples/token_balance_listen_example.rs) |
@@ -188,91 +174,33 @@ let grpc = YellowstoneGrpc::new_with_config(endpoint, token, config)?;
 | 使用 memcmp 过滤器监控 PumpSwap 池账户 | `cargo run --example pumpswap_pool_account_listen_example` | [examples/pumpswap_pool_account_listen_example.rs](examples/pumpswap_pool_account_listen_example.rs) |
 | 使用 memcmp 过滤器监控特定代币的所有关联代币账户 | `cargo run --example mint_all_ata_account_listen_example` | [examples/mint_all_ata_account_listen_example.rs](examples/mint_all_ata_account_listen_example.rs) |
 
+拥有批次的异步消费见 [queued_subscription](examples/queued_subscription.rs).
+
 ### 事件过滤
 
-库支持灵活的事件过滤以减少处理开销并提升性能：
-
-#### 基础过滤
+`ParsePlan` 在事件解码和分配之前选择协议及事件类型，保留开发者标记等必要依赖。`None` 表示全部事件类型，`Some(&[])` 表示不输出事件；显式请求的汇总或原始数据仍可形成空事件批次。日志、CU、raw 指令、审计和交易分类通过 `ParseOptions` 显式开启。
 
 ```rust
-use solana_streamer_sdk::streaming::event_parser::common::{filter::EventTypeFilter, EventType};
-
-// 无过滤 - 接收所有事件
-let event_type_filter = None;
-
-// 过滤特定事件类型 - 只接收 PumpSwap 买入/卖出事件
-let event_type_filter = Some(EventTypeFilter { 
-    include: vec![EventType::PumpSwapBuy, EventType::PumpSwapSell] 
-});
+use solana_streamer_sdk::streaming::event_parser::{
+    common::EventType, ParseOptions, ParsePlan, Protocol,
+};
+let plan = ParsePlan::new(
+    &[Protocol::PumpFun],
+    Some(&[EventType::PumpFunBuy, EventType::PumpFunSell]),
+    ParseOptions::default(),
+);
 ```
 
-#### 性能影响
-
-事件过滤可以带来显著的性能提升：
-- **减少 60-80%** 的不必要事件处理
-- **降低内存使用** 通过过滤掉无关事件
-- **减少网络带宽** 在分布式环境中
-- **更好的专注性** 只处理对应用有意义的事件
-
-#### 按使用场景的过滤示例
-
-**交易机器人（专注交易事件）**
-```rust
-let event_type_filter = Some(EventTypeFilter { 
-    include: vec![
-        EventType::PumpSwapBuy,
-        EventType::PumpSwapSell,
-        EventType::PumpFunTrade,
-        EventType::RaydiumCpmmSwap,
-        EventType::RaydiumClmmSwap,
-        EventType::RaydiumAmmV4Swap,
-        .....
-    ] 
-});
-```
-
-**池监控（专注流动性事件）**
-```rust
-let event_type_filter = Some(EventTypeFilter { 
-    include: vec![
-        EventType::PumpSwapCreatePool,
-        EventType::PumpSwapDeposit,
-        EventType::PumpSwapWithdraw,
-        EventType::RaydiumCpmmInitialize,
-        EventType::RaydiumCpmmDeposit,
-        EventType::RaydiumCpmmWithdraw,
-        EventType::RaydiumClmmCreatePool,
-        ......
-    ] 
-});
-```
+将 plan 放入 `SubscriptionRequest::new(plan)`，设置网络交易/账户过滤器，再调用 `grpc.subscribe(request, callback).await?`。账户订阅先按 owner/discriminator 过滤，回调中通过 `AccountView::decode()` 按需解码。
 
 ## 动态订阅管理
 
-在运行时更新订阅过滤器而无需重新连接到流。
-
 ```rust
-// 在现有订阅上更新过滤器
-grpc.update_subscription(
-    vec![TransactionFilter {
-        account_include: vec!["new_program_id".to_string()],
-        account_exclude: vec![],
-        account_required: vec![],
-    }],
-    vec![AccountFilter {
-        account: vec![],
-        owner: vec![],
-        filters: vec![],
-    }],
-).await?;
+// 包含完整解析计划及交易、账户、slot 过滤配置。
+grpc.update_subscription(new_request).await?;
 ```
 
-- **无需重新连接**: 过滤器变更立即生效，无需关闭流
-- **原子更新**: 交易和账户过滤器同时更新
-- **单一订阅**: 每个客户端实例只有一个活跃订阅
-- **兼容性**: 与立即订阅和高级订阅方法兼容
-
-注意：在同一客户端上多次尝试订阅会返回错误。
+一个客户端同一时间只运行一个订阅。worker 在消息间替换完整计划并发送网络请求；返回成功表示请求已发送，不承诺服务端精确生效的交易边界。参见 [dynamic_subscription](examples/dynamic_subscription.rs)。
 
 ## 🔧 支持的协议
 
@@ -289,22 +217,12 @@ grpc.update_subscription(
 
 ## 🏗️ 架构特性
 
-### 统一事件接口
-
-- **DexEvent 枚举**: 包含所有协议事件的类型安全枚举
-- **Protocol Enum**: 轻松识别事件来源
-- **Event Factory**: 自动事件解析和分类
-
-### 事件解析系统
-
-- **协议特定解析器**: 每个支持协议的专用解析器
-- **事件工厂**: 集中式事件创建和解析
-- **可扩展设计**: 易于添加新协议和事件类型
-
-### 流基础设施
-
-- **Yellowstone gRPC 客户端**: 针对 Solana 事件流优化
-- **高性能处理**: 优化的事件处理机制
+- `TxFrame` 校验并拥有输入；`InstructionAccounts` 直接投影账户索引。
+- `TxParser` 同步解析，复用 worker 本地空间；无全局交易缓存。
+- `TxView` 借用批次；`TxBatch` 移动交付；账户快照使用独立枚举。
+- Program Data 和 CU 共用一次调用日志扫描，原始账户字节端到端使用 `Bytes`。
+- `subscribe_queued` 提供数量、计费字节和交付年龄限制；超限显式报错。
+- `stop().await` 等待生产者停止，已接受的队列数据可继续排空。
 
 ## 📁 项目结构
 
@@ -322,7 +240,6 @@ src/
 │   │   │   ├── raydium_amm_v4/ # Raydium AMM V4 事件解析
 │   │   │   ├── raydium_cpmm/ # Raydium CPMM 事件解析
 │   │   │   └── raydium_clmm/ # Raydium CLMM 事件解析
-│   │   └── factory.rs # 解析器工厂
 │   ├── yellowstone_grpc.rs # Yellowstone gRPC 客户端
 │   └── yellowstone_sub_system.rs # Yellowstone 子系统
 └── lib.rs            # 主库文件
@@ -330,17 +247,17 @@ src/
 
 ## ⚡ 性能考虑
 
-后续事件模型、数据所有权、分阶段迁移和验收标准见[性能架构方案](docs/performance-architecture.md)。
+[架构与验证记录](docs/performance-architecture.md)说明实现、测量范围和后续可选设计。[迁移指南](MIGRATION_CN.md)说明各项解析成本和默认选项。
 
-1. **连接管理**: 正确处理连接生命周期和重连
-2. **事件过滤**: 使用协议过滤减少不必要的事件处理
-3. **内存管理**: 为长时间运行的流实现适当的清理
-4. **错误处理**: 对网络问题和服务中断进行健壮的错误处理
-5. **批处理优化**: 使用批处理减少回调开销，提高吞吐量
-6. **性能监控**: 启用性能监控以识别瓶颈和优化机会
-7. **优雅关闭**: 使用 stop() 方法进行干净关闭，并实现信号处理器以正确清理资源
+当前环境中交易枚举由 11,744 B 降为 1,136 B，每事件元数据由 312 B 降为 80 B。预热借用路径与提前过滤的分配回归见测试；类型尺寸不能用于推算生产吞吐百分比。
 
----
+快速同步回调使用 `subscribe`；数据库/网络消费使用 [queued_subscription](examples/queued_subscription.rs)。队列默认 256 项、64 MiB 计费载荷、5 秒交付年龄；超限停止订阅并报告错误。额度不是进程 RSS 上限。
+
+```bash
+cargo test
+cargo build --examples
+cargo bench --bench parser_replay
+```
 
 ## 📄 许可证
 

@@ -1,4 +1,5 @@
 use crate::streaming::event_parser::common::high_performance_clock::get_high_perf_clock;
+use anyhow::{Context, Result};
 use solana_sdk::{pubkey::Pubkey, signature::Signature};
 use std::{collections::HashMap, fmt};
 use yellowstone_grpc_proto::{
@@ -12,15 +13,8 @@ use yellowstone_grpc_proto::{
 pub type TransactionsFilterMap = HashMap<String, SubscribeRequestFilterTransactions>;
 pub type AccountsFilterMap = HashMap<String, SubscribeRequestFilterAccounts>;
 
-#[derive(Clone, Debug)]
-pub enum EventPretty {
-    BlockMeta(BlockMetaPretty),
-    Transaction(TransactionPretty),
-    Account(AccountPretty),
-}
-
 #[derive(Clone, Default)]
-pub struct AccountPretty {
+pub struct AccountFrame {
     pub slot: u64,
     pub write_version: u64,
     pub is_startup: bool,
@@ -30,13 +24,13 @@ pub struct AccountPretty {
     pub lamports: u64,
     pub owner: Pubkey,
     pub rent_epoch: u64,
-    pub data: Vec<u8>,
+    pub data: bytes::Bytes,
     pub recv_us: i64,
 }
 
-impl fmt::Debug for AccountPretty {
+impl fmt::Debug for AccountFrame {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("AccountPretty")
+        f.debug_struct("AccountFrame")
             .field("slot", &self.slot)
             .field("write_version", &self.write_version)
             .field("is_startup", &self.is_startup)
@@ -110,27 +104,29 @@ impl Default for TransactionPretty {
 }
 
 /// Move protobuf payloads into the event wrapper without allocating a pooled shell.
-impl From<SubscribeUpdateAccount> for AccountPretty {
-    fn from(update: SubscribeUpdateAccount) -> Self {
-        let info = update.account.expect("account update must contain account info");
-        Self {
+impl TryFrom<SubscribeUpdateAccount> for AccountFrame {
+    type Error = anyhow::Error;
+    fn try_from(update: SubscribeUpdateAccount) -> Result<Self> {
+        let info = update.account.context("account update missing account info")?;
+        Ok(Self {
             slot: update.slot,
             write_version: info.write_version,
             is_startup: update.is_startup,
             signature: info
                 .txn_signature
                 .map(|signature| {
-                    Signature::try_from(signature.as_slice()).expect("valid signature")
+                    Signature::try_from(signature.as_slice()).context("invalid signature")
                 })
+                .transpose()?
                 .unwrap_or_default(),
-            pubkey: Pubkey::try_from(info.pubkey.as_slice()).expect("valid pubkey"),
+            pubkey: Pubkey::try_from(info.pubkey.as_slice()).context("invalid pubkey")?,
             executable: info.executable,
             lamports: info.lamports,
-            owner: Pubkey::try_from(info.owner.as_slice()).expect("valid pubkey"),
+            owner: Pubkey::try_from(info.owner.as_slice()).context("invalid pubkey")?,
             rent_epoch: info.rent_epoch,
             data: info.data,
             recv_us: get_high_perf_clock(),
-        }
+        })
     }
 }
 
@@ -145,18 +141,22 @@ impl From<(SubscribeUpdateBlockMeta, Option<Timestamp>)> for BlockMetaPretty {
     }
 }
 
-impl From<(SubscribeUpdateTransaction, Option<Timestamp>)> for TransactionPretty {
-    fn from((update, block_time): (SubscribeUpdateTransaction, Option<Timestamp>)) -> Self {
-        let info = update.transaction.expect("transaction update must contain transaction info");
-        Self {
+impl TryFrom<(SubscribeUpdateTransaction, Option<Timestamp>)> for TransactionPretty {
+    type Error = anyhow::Error;
+    fn try_from(
+        (update, block_time): (SubscribeUpdateTransaction, Option<Timestamp>),
+    ) -> Result<Self> {
+        let info = update.transaction.context("transaction update missing transaction info")?;
+        Ok(Self {
             slot: update.slot,
             transaction_index: Some(info.index),
             block_hash: String::new(),
             block_time,
-            signature: Signature::try_from(info.signature.as_slice()).expect("valid signature"),
+            signature: Signature::try_from(info.signature.as_slice())
+                .context("invalid signature")?,
             is_vote: info.is_vote,
             recv_us: get_high_perf_clock(),
             grpc_tx: info,
-        }
+        })
     }
 }

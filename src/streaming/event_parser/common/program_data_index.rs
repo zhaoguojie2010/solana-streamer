@@ -1,222 +1,198 @@
-use crate::streaming::event_parser::common::extract_program_data;
+//! One invocation scan for both execution data and compute-unit observations.
+use crate::streaming::event_parser::{
+    core::common_event_parser::COMPUTE_BUDGET_PROGRAM_ID, TxFrame,
+};
 use solana_sdk::pubkey::Pubkey;
 use std::str::FromStr;
 
-#[derive(Clone, Debug)]
-pub struct ProgramDataItem {
-    pub base64: String,
+#[derive(Clone, Copy, Debug)]
+pub struct ProgramDataItem<'a> {
+    pub data: &'a [u8],
     pub program_id: Pubkey,
-    pub depth: usize,
     pub log_index: usize,
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct ProgramDataIndex {
-    pub outer: Vec<Option<ProgramDataItem>>,
-    pub inner: Vec<Vec<Option<ProgramDataItem>>>,
-    pub outer_all: Vec<Vec<ProgramDataItem>>,
-    pub inner_all: Vec<Vec<Vec<ProgramDataItem>>>,
+pub(crate) struct Observation {
+    pub first_data: Option<usize>,
+    last_data: Option<usize>,
+    pub consumed_cu: Option<u32>,
+    pub complete: bool,
 }
-
-impl ProgramDataIndex {
-    pub fn get_outer(&self, outer_index: i64) -> Option<&ProgramDataItem> {
-        if outer_index < 0 {
-            return None;
-        }
-        self.outer.get(outer_index as usize)?.as_ref()
-    }
-
-    pub fn get_inner(&self, outer_index: i64, inner_index: i64) -> Option<&ProgramDataItem> {
-        if outer_index < 0 || inner_index < 0 {
-            return None;
-        }
-        let outer = self.inner.get(outer_index as usize)?;
-        outer.get(inner_index as usize)?.as_ref()
-    }
-
-    pub fn get_outer_all(&self, outer_index: i64) -> &[ProgramDataItem] {
-        usize::try_from(outer_index)
-            .ok()
-            .and_then(|index| self.outer_all.get(index))
-            .map(Vec::as_slice)
-            .unwrap_or_default()
-    }
-
-    pub fn get_inner_all(&self, outer_index: i64, inner_index: i64) -> &[ProgramDataItem] {
-        usize::try_from(outer_index)
-            .ok()
-            .and_then(|outer| self.inner_all.get(outer))
-            .and_then(|items| usize::try_from(inner_index).ok().and_then(|inner| items.get(inner)))
-            .map(Vec::as_slice)
-            .unwrap_or_default()
-    }
-}
-
 #[derive(Clone, Debug)]
-struct InvocationSpan {
-    program_id: Pubkey,
-    depth: usize,
-    start: usize,
-    end: usize,
+pub(crate) struct DataLocation {
+    pub log_index: usize,
+    pub next: Option<usize>,
+}
+#[derive(Debug)]
+struct Call {
+    program: Pubkey,
+    instruction: Option<usize>,
+    depth: u32,
+}
+#[derive(Debug, Default)]
+pub(crate) struct InvocationIndex {
+    pub observations: Vec<Observation>,
+    pub data: Vec<DataLocation>,
+    stack: Vec<Call>,
 }
 
-fn parse_invoke_line(log: &str) -> Option<(Pubkey, usize)> {
-    const PREFIX: &str = "Program ";
-    const INVOKE_MARK: &str = " invoke [";
-    if !log.starts_with(PREFIX) || !log.contains(INVOKE_MARK) {
-        return None;
-    }
-    let rest = &log[PREFIX.len()..];
-    let mut parts = rest.split(INVOKE_MARK);
-    let program_id_str = parts.next()?.trim();
-    let depth_part = parts.next()?.trim();
-    let depth_str = depth_part.trim_end_matches(']').trim();
-    let program_id = Pubkey::from_str(program_id_str).ok()?;
-    let depth = depth_str.parse::<usize>().ok()?;
-    Some((program_id, depth))
+fn has_no_invocation_log(program: &Pubkey) -> bool {
+    *program == COMPUTE_BUDGET_PROGRAM_ID
+        || *program == solana_sdk::pubkey!("Ed25519SigVerify111111111111111111111111111")
+        || *program == solana_sdk::pubkey!("KeccakSecp256k11111111111111111111111111111")
+        || *program == solana_sdk::pubkey!("Secp256r1SigVerify1111111111111111111111111")
 }
-
-fn is_success_or_failed_line(log: &str) -> bool {
-    log.starts_with("Program ") && (log.contains(" success") || log.contains(" failed:"))
-}
-
-fn parse_invocation_spans(logs: &[String]) -> Vec<InvocationSpan> {
-    let mut spans: Vec<InvocationSpan> = Vec::new();
-    let mut stack: Vec<usize> = Vec::new();
-
-    for (idx, log) in logs.iter().enumerate() {
-        if let Some((program_id, depth)) = parse_invoke_line(log) {
-            spans.push(InvocationSpan { program_id, depth, start: idx, end: idx });
-            stack.push(spans.len() - 1);
-            continue;
+impl InvocationIndex {
+    pub fn build(&mut self, frame: &TxFrame, collect_data: bool, collect_cu: bool) {
+        self.observations.clear();
+        self.data.clear();
+        self.stack.clear();
+        self.observations.resize_with(frame.instructions.len(), Observation::default);
+        let mut next_outer = 0;
+        let mut next_inner = None;
+        let mut group_end = 0;
+        let mut aligned = true;
+        for (log_index, log) in frame.logs.iter().enumerate() {
+            if log.contains("Log truncated") {
+                break;
+            }
+            if let Some(rest) = log.strip_prefix("Program ") {
+                if let Some((program, depth)) = rest.split_once(" invoke [") {
+                    let (Ok(program), Some(depth)) = (
+                        Pubkey::from_str(program),
+                        depth.strip_suffix(']').and_then(|s| s.parse::<u32>().ok()),
+                    ) else {
+                        continue;
+                    };
+                    if depth == 0 {
+                        continue;
+                    }
+                    let instruction = if depth == 1 {
+                        // A missing exit or mismatching program makes positional attribution ambiguous.
+                        if !self.stack.is_empty() {
+                            aligned = false;
+                            self.stack.clear();
+                        }
+                        while next_outer < frame.instructions.len()
+                            && frame.keys[frame.instructions[next_outer].program_id_index as usize]
+                                != program
+                            && has_no_invocation_log(
+                                &frame.keys
+                                    [frame.instructions[next_outer].program_id_index as usize],
+                            )
+                        {
+                            next_outer = frame.instructions[next_outer].group_end;
+                        }
+                        let ix = frame.instructions.get(next_outer);
+                        if aligned
+                            && ix.is_some_and(|ix| {
+                                frame.keys[ix.program_id_index as usize] == program
+                            })
+                        {
+                            let index = next_outer;
+                            group_end = ix.unwrap().group_end;
+                            next_outer = group_end;
+                            next_inner = Some(index + 1);
+                            Some(index)
+                        } else {
+                            aligned = false;
+                            next_inner = None;
+                            None
+                        }
+                    } else if self.stack.last().is_some_and(|c| c.depth + 1 == depth) {
+                        next_inner.and_then(|index| {
+                            let ix = frame.instructions.get(index)?;
+                            if index < group_end
+                                && frame.keys[ix.program_id_index as usize] == program
+                                && ix.stack_height.is_none_or(|h| h == depth)
+                            {
+                                next_inner = Some(index + 1);
+                                Some(index)
+                            } else {
+                                next_inner = None;
+                                None
+                            }
+                        })
+                    } else {
+                        for call in &self.stack {
+                            if let Some(ix) = call.instruction {
+                                self.observations[ix] = Observation::default();
+                            }
+                        }
+                        self.stack.clear();
+                        aligned = false;
+                        next_inner = None;
+                        None
+                    };
+                    self.stack.push(Call { program, instruction, depth });
+                    continue;
+                }
+                if let Some((program, tail)) = rest.split_once(" consumed ") {
+                    if collect_cu {
+                        if let (Ok(program), Some(cu)) = (
+                            Pubkey::from_str(program),
+                            tail.split_once(" of ").and_then(|(cu, _)| cu.parse::<u32>().ok()),
+                        ) {
+                            if let Some(call) = self.stack.last().filter(|c| c.program == program) {
+                                if let Some(ix) = call.instruction {
+                                    self.observations[ix].consumed_cu = Some(cu);
+                                }
+                            }
+                        }
+                    }
+                    continue;
+                }
+                let exit = rest
+                    .strip_suffix(" success")
+                    .or_else(|| rest.split_once(" failed:").map(|(program, _)| program));
+                if let Some(program) = exit {
+                    if let Ok(program) = Pubkey::from_str(program) {
+                        if self.stack.last().is_some_and(|c| c.program == program) {
+                            if let Some(ix) = self.stack.pop().unwrap().instruction {
+                                self.observations[ix].complete = true;
+                            }
+                        } else {
+                            self.stack.clear();
+                            next_inner = None;
+                            aligned = false;
+                        }
+                    }
+                    continue;
+                }
+            }
+            if collect_data && log.starts_with("Program data: ") {
+                if let Some(ix) = self.stack.last().and_then(|c| c.instruction) {
+                    let location = self.data.len();
+                    self.data.push(DataLocation { log_index, next: None });
+                    let observation = &mut self.observations[ix];
+                    if let Some(last) = observation.last_data {
+                        self.data[last].next = Some(location);
+                    } else {
+                        observation.first_data = Some(location);
+                    }
+                    observation.last_data = Some(location);
+                }
+            }
         }
-
-        if is_success_or_failed_line(log) {
-            if let Some(span_idx) = stack.pop() {
-                spans[span_idx].end = idx;
+        // Incomplete invocations expose no CU or execution enrichment. Never borrow a sibling's logs.
+        for observation in &mut self.observations {
+            if !observation.complete {
+                observation.first_data = None;
+                observation.consumed_cu = None;
             }
         }
     }
-
-    let last_idx = logs.len().saturating_sub(1);
-    for span_idx in stack {
-        spans[span_idx].end = last_idx;
-    }
-
-    spans
-}
-
-fn is_within_child_span(idx: usize, span: &InvocationSpan, spans: &[InvocationSpan]) -> bool {
-    spans.iter().any(|child| {
-        child.depth > span.depth
-            && child.start >= span.start
-            && child.end <= span.end
-            && idx >= child.start
-            && idx <= child.end
-    })
-}
-
-fn find_program_data_in_span(
-    span: &InvocationSpan,
-    spans: &[InvocationSpan],
-    logs: &[String],
-) -> Option<ProgramDataItem> {
-    if logs.is_empty() || span.start >= logs.len() {
-        return None;
-    }
-    let end = span.end.min(logs.len() - 1);
-    for idx in span.start..=end {
-        if is_within_child_span(idx, span, spans) {
-            continue;
+    pub fn trim(&mut self, max_instructions: usize, max_logs: usize) {
+        self.stack.clear();
+        if self.stack.capacity() > max_instructions {
+            self.stack = Vec::new();
         }
-        if let Some(base64) = extract_program_data(&logs[idx]) {
-            return Some(ProgramDataItem {
-                base64: base64.to_string(),
-                program_id: span.program_id,
-                depth: span.depth,
-                log_index: idx,
-            });
+        if self.observations.capacity() > max_instructions {
+            self.observations = Vec::new();
+        }
+        if self.data.capacity() > max_logs {
+            self.data = Vec::new();
         }
     }
-    None
-}
-
-fn find_all_program_data_in_span(
-    span: &InvocationSpan,
-    spans: &[InvocationSpan],
-    logs: &[String],
-) -> Vec<ProgramDataItem> {
-    if logs.is_empty() || span.start >= logs.len() {
-        return Vec::new();
-    }
-    let end = span.end.min(logs.len() - 1);
-    (span.start..=end)
-        .filter(|idx| !is_within_child_span(*idx, span, spans))
-        .filter_map(|idx| {
-            extract_program_data(&logs[idx]).map(|base64| ProgramDataItem {
-                base64: base64.to_string(),
-                program_id: span.program_id,
-                depth: span.depth,
-                log_index: idx,
-            })
-        })
-        .collect()
-}
-
-pub fn build_program_data_index(
-    logs: &[String],
-    outer_len: usize,
-    inner_instructions: &[yellowstone_grpc_proto::prelude::InnerInstructions],
-) -> ProgramDataIndex {
-    let mut index = ProgramDataIndex {
-        outer: vec![None; outer_len],
-        inner: vec![Vec::new(); outer_len],
-        outer_all: vec![Vec::new(); outer_len],
-        inner_all: vec![Vec::new(); outer_len],
-    };
-
-    for inner in inner_instructions.iter() {
-        let outer_idx = inner.index as usize;
-        if outer_idx < outer_len {
-            index.inner[outer_idx] = vec![None; inner.instructions.len()];
-            index.inner_all[outer_idx] = vec![Vec::new(); inner.instructions.len()];
-        }
-    }
-
-    if logs.is_empty() || outer_len == 0 {
-        return index;
-    }
-
-    let spans = parse_invocation_spans(logs);
-    let outer_spans: Vec<&InvocationSpan> = spans.iter().filter(|span| span.depth == 1).collect();
-
-    for outer_idx in 0..outer_len {
-        let Some(outer_span) = outer_spans.get(outer_idx).copied() else {
-            continue;
-        };
-        index.outer[outer_idx] = find_program_data_in_span(outer_span, &spans, logs);
-        index.outer_all[outer_idx] = find_all_program_data_in_span(outer_span, &spans, logs);
-
-        if index.inner[outer_idx].is_empty() {
-            continue;
-        }
-        let mut inner_spans: Vec<&InvocationSpan> = spans
-            .iter()
-            .filter(|span| {
-                span.depth >= 2 && span.start >= outer_span.start && span.end <= outer_span.end
-            })
-            .collect();
-        inner_spans.sort_by_key(|span| span.start);
-
-        for inner_idx in 0..index.inner[outer_idx].len() {
-            if let Some(inner_span) = inner_spans.get(inner_idx).copied() {
-                index.inner[outer_idx][inner_idx] =
-                    find_program_data_in_span(inner_span, &spans, logs);
-                index.inner_all[outer_idx][inner_idx] =
-                    find_all_program_data_in_span(inner_span, &spans, logs);
-            }
-        }
-    }
-
-    index
 }

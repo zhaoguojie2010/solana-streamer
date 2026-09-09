@@ -1,10 +1,11 @@
+use crate::streaming::event_parser::InstructionAccounts;
 use crate::streaming::event_parser::{
     common::{
         read_i32_le, read_u128_le, read_u64_le, read_u8_le, EventMetadata, EventType,
         ProgramDataItem,
     },
     protocols::pancakeswap::{discriminators, PancakeSwapSwapEvent, PancakeSwapSwapV2Event},
-    DexEvent,
+    TxEvent,
 };
 use solana_sdk::pubkey::Pubkey;
 
@@ -16,9 +17,9 @@ pub const PANCAKESWAP_PROGRAM_ID: Pubkey =
 pub fn parse_pancakeswap_instruction_data(
     discriminator: &[u8],
     data: &[u8],
-    accounts: &[Pubkey],
+    accounts: InstructionAccounts<'_>,
     metadata: EventMetadata,
-) -> Option<DexEvent> {
+) -> Option<TxEvent> {
     match discriminator {
         discriminators::SWAP => parse_swap_instruction(data, accounts, metadata),
         discriminators::SWAP_V2 => parse_swap_v2_instruction(data, accounts, metadata),
@@ -37,7 +38,7 @@ pub fn parse_pancakeswap_inner_instruction_data(
     _discriminator: &[u8],
     _data: &[u8],
     _metadata: EventMetadata,
-) -> Option<DexEvent> {
+) -> Option<TxEvent> {
     None
 }
 
@@ -51,9 +52,9 @@ pub fn parse_pancakeswap_inner_instruction_data(
 /// 解码层复用 Raydium CLMM 的结构体，但产出 PancakeSwap 自有账户事件类型。
 pub fn parse_pancakeswap_account_data(
     discriminator: &[u8],
-    account: crate::streaming::grpc::AccountPretty,
+    account: crate::streaming::grpc::AccountFrame,
     metadata: crate::streaming::event_parser::common::EventMetadata,
-) -> Option<crate::streaming::event_parser::DexEvent> {
+) -> Option<crate::streaming::event_parser::AccountEvent> {
     use crate::streaming::event_parser::protocols::{
         pancakeswap::types, raydium_clmm::events::discriminators as clmm_discriminators,
     };
@@ -72,9 +73,9 @@ pub fn parse_pancakeswap_account_data(
 
 fn parse_swap_instruction(
     data: &[u8],
-    accounts: &[Pubkey],
+    accounts: InstructionAccounts<'_>,
     mut metadata: EventMetadata,
-) -> Option<DexEvent> {
+) -> Option<TxEvent> {
     metadata.event_type = EventType::PancakeSwapSwap;
 
     // IDL 标准布局: amount(u64) + other_amount_threshold(u64) + sqrt_price_limit(u128) + is_base_input(bool)
@@ -87,37 +88,37 @@ fn parse_swap_instruction(
     // Swap 账户顺序（IDL）:
     // [0]=payer, [1]=amm_config, [2]=pool_state, [3]=input_token_account, [4]=output_token_account,
     // [5]=input_vault, [6]=output_vault, [7]=observation_state, [8]=token_program, [9]=tick_array
-    let input_token_account = accounts[3];
-    let output_token_account = accounts[4];
-    let input_vault = accounts[5];
-    let output_vault = accounts[6];
+    let input_token_account = *accounts.get(3)?;
+    let output_token_account = *accounts.get(4)?;
+    let input_vault = *accounts.get(5)?;
+    let output_vault = *accounts.get(6)?;
 
-    Some(DexEvent::PancakeSwapSwapEvent(PancakeSwapSwapEvent {
+    Some(TxEvent::PancakeSwapSwapEvent(PancakeSwapSwapEvent {
         metadata,
         amount: read_u64_le(data, 0)?,
         other_amount_threshold: read_u64_le(data, 8)?,
         sqrt_price_limit: read_u128_le(data, 16)?,
         is_base_input,
-        payer: accounts[0],
-        amm_config: accounts[1],
-        pool_state: accounts[2],
+        payer: *accounts.get(0)?,
+        amm_config: *accounts.get(1)?,
+        pool_state: *accounts.get(2)?,
         input_token_account,
         output_token_account,
         input_vault,
         output_vault,
-        observation_state: accounts[7],
-        token_program: accounts[8],
-        tick_array: accounts[9],
-        remaining_accounts: accounts[10..].to_vec(),
+        observation_state: *accounts.get(7)?,
+        token_program: *accounts.get(8)?,
+        tick_array: *accounts.get(9)?,
+        remaining_account_indices: accounts.indices_from(10).collect(),
         ..Default::default()
     }))
 }
 
 fn parse_swap_v2_instruction(
     data: &[u8],
-    accounts: &[Pubkey],
+    accounts: InstructionAccounts<'_>,
     mut metadata: EventMetadata,
-) -> Option<DexEvent> {
+) -> Option<TxEvent> {
     metadata.event_type = EventType::PancakeSwapSwapV2;
 
     // IDL 标准布局同 Swap（33 字节），兼容历史 34 字节布局。
@@ -130,33 +131,33 @@ fn parse_swap_v2_instruction(
     // [0]=payer, [1]=amm_config, [2]=pool_state, [3]=input_token_account, [4]=output_token_account,
     // [5]=input_vault, [6]=output_vault, [7]=observation_state, [8]=token_program, [9]=token_program_2022,
     // [10]=memo_program, [11]=input_vault_mint, [12]=output_vault_mint
-    let input_token_account = accounts[3];
-    let output_token_account = accounts[4];
-    let input_vault = accounts[5];
-    let output_vault = accounts[6];
-    let input_mint = accounts[11];
-    let output_mint = accounts[12];
+    let input_token_account = *accounts.get(3)?;
+    let output_token_account = *accounts.get(4)?;
+    let input_vault = *accounts.get(5)?;
+    let output_vault = *accounts.get(6)?;
+    let input_mint = *accounts.get(11)?;
+    let output_mint = *accounts.get(12)?;
 
-    Some(DexEvent::PancakeSwapSwapV2Event(PancakeSwapSwapV2Event {
+    Some(TxEvent::PancakeSwapSwapV2Event(PancakeSwapSwapV2Event {
         metadata,
         amount: read_u64_le(data, 0)?,
         other_amount_threshold: read_u64_le(data, 8)?,
         sqrt_price_limit: read_u128_le(data, 16)?,
         is_base_input,
-        payer: accounts[0],
-        amm_config: accounts[1],
-        pool_state: accounts[2],
+        payer: *accounts.get(0)?,
+        amm_config: *accounts.get(1)?,
+        pool_state: *accounts.get(2)?,
         input_token_account,
         output_token_account,
         input_vault,
         output_vault,
-        observation_state: accounts[7],
-        token_program: accounts[8],
-        token_program_2022: accounts[9],
-        memo_program: accounts[10],
+        observation_state: *accounts.get(7)?,
+        token_program: *accounts.get(8)?,
+        token_program_2022: *accounts.get(9)?,
+        memo_program: *accounts.get(10)?,
         input_mint,
         output_mint,
-        remaining_accounts: accounts[13..].to_vec(),
+        remaining_account_indices: accounts.indices_from(13).collect(),
         ..Default::default()
     }))
 }
@@ -190,10 +191,7 @@ pub struct SwapEventLogData {
 ///
 /// 日志格式: "Program data: <base64>"
 /// 编码格式: [8字节事件鉴别器][borsh(SwapEvent)]
-pub fn parse_swap_event_from_log(log_data_base64: &str) -> Option<SwapEventLogData> {
-    use base64::{engine::general_purpose::STANDARD, Engine};
-
-    let decoded = STANDARD.decode(log_data_base64).ok()?;
+pub fn parse_swap_event_from_bytes(decoded: &[u8]) -> Option<SwapEventLogData> {
     if decoded.len() < 8 {
         return None;
     }
@@ -253,7 +251,7 @@ pub fn parse_swap_event_from_program_data(
     if item.program_id != PANCAKESWAP_PROGRAM_ID {
         return None;
     }
-    let event_data = parse_swap_event_from_log(&item.base64)?;
+    let event_data = parse_swap_event_from_bytes(item.data)?;
     if &event_data.pool_state != expected_pool_state {
         return None;
     }
@@ -285,13 +283,14 @@ mod tests {
         let event = parse_pancakeswap_instruction_data(
             discriminators::SWAP,
             &data,
-            &accounts,
+            InstructionAccounts::new(&accounts, &(0..accounts.len() as u8).collect::<Vec<_>>())
+                .unwrap(),
             EventMetadata::default(),
         )
         .expect("swap should parse");
 
         match event {
-            DexEvent::PancakeSwapSwapEvent(e) => {
+            TxEvent::PancakeSwapSwapEvent(e) => {
                 assert_eq!(e.pool_state, accounts[2]);
                 assert_eq!(e.payer, accounts[0]);
                 assert_eq!(e.amm_config, accounts[1]);
@@ -312,13 +311,14 @@ mod tests {
         let event = parse_pancakeswap_instruction_data(
             discriminators::SWAP_V2,
             &data,
-            &accounts,
+            InstructionAccounts::new(&accounts, &(0..accounts.len() as u8).collect::<Vec<_>>())
+                .unwrap(),
             EventMetadata::default(),
         )
         .expect("swap_v2 should parse");
 
         match event {
-            DexEvent::PancakeSwapSwapV2Event(e) => {
+            TxEvent::PancakeSwapSwapV2Event(e) => {
                 assert_eq!(e.pool_state, accounts[2]);
                 assert_eq!(e.payer, accounts[0]);
                 assert_eq!(e.amm_config, accounts[1]);
@@ -338,5 +338,29 @@ mod tests {
 
         data_33.push(0);
         assert_eq!(parse_is_base_input(&data_33), Some(true));
+    }
+}
+
+/// Classify before allocating or decoding a protocol instruction.
+pub(crate) fn instruction_event_type(discriminator: &[u8]) -> Option<EventType> {
+    match discriminator {
+        discriminators::SWAP => Some(EventType::PancakeSwapSwap),
+        discriminators::SWAP_V2 => Some(EventType::PancakeSwapSwapV2),
+        _ => None,
+    }
+}
+
+/// Classify before allocating or decoding a protocol account.
+pub(crate) fn account_event_type(discriminator: &[u8]) -> Option<EventType> {
+    use crate::streaming::event_parser::protocols::raydium_clmm::discriminators as clmm_discriminators;
+    match discriminator {
+        d if d == clmm_discriminators::POOL_STATE => Some(EventType::AccountPancakeSwapPoolState),
+        d if d == clmm_discriminators::TICK_ARRAY_STATE => {
+            Some(EventType::AccountPancakeSwapTickArrayState)
+        }
+        d if d == clmm_discriminators::TICK_ARRAY_BITMAP_EXTENSION => {
+            Some(EventType::AccountPancakeSwapTickArrayBitmapExtension)
+        }
+        _ => None,
     }
 }

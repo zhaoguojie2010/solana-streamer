@@ -8,9 +8,9 @@ use crate::streaming::{
         protocols::raydium_cpmm::{
             RaydiumCpmmAmmConfigAccountEvent, RaydiumCpmmPoolStateAccountEvent,
         },
-        DexEvent,
+        AccountEvent,
     },
-    grpc::AccountPretty,
+    grpc::AccountFrame,
 };
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, BorshDeserialize)]
@@ -40,14 +40,17 @@ pub fn amm_config_decode(data: &[u8]) -> Option<AmmConfig> {
     borsh::from_slice::<AmmConfig>(&data[..AMM_CONFIG_SIZE]).ok()
 }
 
-pub fn amm_config_parser(account: AccountPretty, mut metadata: EventMetadata) -> Option<DexEvent> {
+pub fn amm_config_parser(
+    account: AccountFrame,
+    mut metadata: EventMetadata,
+) -> Option<AccountEvent> {
     metadata.event_type = EventType::AccountRaydiumCpmmAmmConfig;
 
     if account.data.len() < AMM_CONFIG_SIZE + 8 {
         return None;
     }
     if let Some(amm_config) = amm_config_decode(&account.data[8..AMM_CONFIG_SIZE + 8]) {
-        Some(DexEvent::RaydiumCpmmAmmConfigAccountEvent(RaydiumCpmmAmmConfigAccountEvent {
+        Some(AccountEvent::RaydiumCpmmAmmConfigAccountEvent(RaydiumCpmmAmmConfigAccountEvent {
             metadata,
             pubkey: account.pubkey,
             executable: account.executable,
@@ -109,14 +112,17 @@ pub fn pool_state_decode(data: &[u8]) -> Option<PoolState> {
     borsh::from_slice::<PoolState>(&data[..POOL_STATE_SIZE]).ok()
 }
 
-pub fn pool_state_parser(account: AccountPretty, mut metadata: EventMetadata) -> Option<DexEvent> {
+pub fn pool_state_parser(
+    account: AccountFrame,
+    mut metadata: EventMetadata,
+) -> Option<AccountEvent> {
     metadata.event_type = EventType::AccountRaydiumCpmmPoolState;
 
     if account.data.len() < POOL_STATE_SIZE + 8 {
         return None;
     }
     if let Some(pool_state) = pool_state_decode(&account.data[8..POOL_STATE_SIZE + 8]) {
-        Some(DexEvent::RaydiumCpmmPoolStateAccountEvent(RaydiumCpmmPoolStateAccountEvent {
+        Some(AccountEvent::RaydiumCpmmPoolStateAccountEvent(RaydiumCpmmPoolStateAccountEvent {
             metadata,
             pubkey: account.pubkey,
             executable: account.executable,

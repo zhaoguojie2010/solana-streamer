@@ -41,7 +41,7 @@ pub struct PancakeSwapSwapEvent {
     pub observation_state: Pubkey,
     pub token_program: Pubkey,
     pub tick_array: Pubkey,
-    pub remaining_accounts: Vec<Pubkey>,
+    pub remaining_account_indices: Vec<u8>,
 }
 
 /// PancakeSwap V3 SwapV2 事件
@@ -83,7 +83,7 @@ pub struct PancakeSwapSwapV2Event {
     pub memo_program: Pubkey,
     pub input_mint: Pubkey,
     pub output_mint: Pubkey,
-    pub remaining_accounts: Vec<Pubkey>,
+    pub remaining_account_indices: Vec<u8>,
 }
 
 /// PancakeSwap PoolState 账户事件
@@ -96,7 +96,7 @@ pub struct PancakeSwapPoolStateAccountEvent {
     pub owner: Pubkey,
     pub rent_epoch: u64,
     #[serde(skip)]
-    pub raw_account_data: Vec<u8>,
+    pub raw_account_data: bytes::Bytes,
     pub pool_state: PoolState,
 }
 
@@ -110,7 +110,7 @@ pub struct PancakeSwapTickArrayStateAccountEvent {
     pub owner: Pubkey,
     pub rent_epoch: u64,
     #[serde(skip)]
-    pub raw_account_data: Vec<u8>,
+    pub raw_account_data: bytes::Bytes,
     pub tick_array_state: TickArrayState,
 }
 
@@ -124,7 +124,7 @@ pub struct PancakeSwapTickArrayBitmapExtensionAccountEvent {
     pub owner: Pubkey,
     pub rent_epoch: u64,
     #[serde(skip)]
-    pub raw_account_data: Vec<u8>,
+    pub raw_account_data: bytes::Bytes,
     pub tick_array_bitmap_extension: TickArrayBitmapExtension,
 }
 

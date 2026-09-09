@@ -6,9 +6,9 @@ use crate::streaming::{
     event_parser::{
         common::{EventMetadata, EventType},
         protocols::whirlpool::{WhirlpoolAccountEvent, WhirlpoolTickArrayAccountEvent},
-        DexEvent,
+        AccountEvent,
     },
-    grpc::AccountPretty,
+    grpc::AccountFrame,
 };
 
 // Number of rewards supported by Whirlpools
@@ -276,7 +276,10 @@ pub fn whirlpool_decode(data: &[u8]) -> Option<Whirlpool> {
     })
 }
 
-pub fn whirlpool_parser(account: AccountPretty, mut metadata: EventMetadata) -> Option<DexEvent> {
+pub fn whirlpool_parser(
+    account: AccountFrame,
+    mut metadata: EventMetadata,
+) -> Option<AccountEvent> {
     metadata.event_type = EventType::AccountWhirlpool;
 
     // 账户总大小应该是 8 (discriminator) + 645 (数据) = 653 字节
@@ -299,7 +302,7 @@ pub fn whirlpool_parser(account: AccountPretty, mut metadata: EventMetadata) -> 
 
     // 跳过前 8 字节的 discriminator，解析接下来的 645 字节
     if let Some(whirlpool) = whirlpool_decode(&account.data[8..8 + WHIRLPOOL_SIZE]) {
-        Some(DexEvent::WhirlpoolAccountEvent(WhirlpoolAccountEvent {
+        Some(AccountEvent::WhirlpoolAccountEvent(WhirlpoolAccountEvent {
             metadata,
             pubkey: account.pubkey,
             executable: account.executable,
@@ -327,9 +330,9 @@ pub fn whirlpool_tick_array_decode(data: &[u8]) -> Option<WhirlpoolTickArray> {
 }
 
 pub fn whirlpool_tick_array_parser(
-    account: AccountPretty,
+    account: AccountFrame,
     mut metadata: EventMetadata,
-) -> Option<DexEvent> {
+) -> Option<AccountEvent> {
     metadata.event_type = EventType::AccountWhirlpoolTickArray;
 
     let expected_size = 8 + WHIRLPOOL_TICK_ARRAY_SIZE;
@@ -345,7 +348,7 @@ pub fn whirlpool_tick_array_parser(
     if let Some(tick_array) =
         whirlpool_tick_array_decode(&account.data[8..8 + WHIRLPOOL_TICK_ARRAY_SIZE])
     {
-        Some(DexEvent::WhirlpoolTickArrayAccountEvent(WhirlpoolTickArrayAccountEvent {
+        Some(AccountEvent::WhirlpoolTickArrayAccountEvent(WhirlpoolTickArrayAccountEvent {
             metadata,
             pubkey: account.pubkey,
             executable: account.executable,

@@ -39,8 +39,6 @@ pub enum WhirlpoolInstructionKind {
 pub struct WhirlpoolInstructionEvent {
     pub metadata: EventMetadata,
     pub kind: WhirlpoolInstructionKind,
-    pub accounts: Vec<Pubkey>,
-    pub data: Vec<u8>,
     #[serde(default)]
     pub execution_events: Vec<WhirlpoolExecutionEvent>,
 }
@@ -129,7 +127,7 @@ pub struct WhirlpoolSwapEvent {
     pub tick_array_1: Pubkey,
     pub tick_array_2: Pubkey,
     pub oracle: Pubkey,
-    pub remaining_accounts: Vec<Pubkey>,
+    pub remaining_account_indices: Vec<u8>,
 }
 
 /// Whirlpool SwapV2 事件
@@ -170,7 +168,7 @@ pub struct WhirlpoolSwapV2Event {
     pub tick_array_1: Pubkey,
     pub tick_array_2: Pubkey,
     pub oracle: Pubkey,
-    pub remaining_accounts: Vec<Pubkey>,
+    pub remaining_account_indices: Vec<u8>,
 }
 
 /// Whirlpool 账户事件
@@ -183,7 +181,7 @@ pub struct WhirlpoolAccountEvent {
     pub owner: Pubkey,
     pub rent_epoch: u64,
     #[serde(skip)]
-    pub raw_account_data: Vec<u8>,
+    pub raw_account_data: bytes::Bytes,
     pub whirlpool: Whirlpool,
 }
 
@@ -197,7 +195,7 @@ pub struct WhirlpoolTickArrayAccountEvent {
     pub owner: Pubkey,
     pub rent_epoch: u64,
     #[serde(skip)]
-    pub raw_account_data: Vec<u8>,
+    pub raw_account_data: bytes::Bytes,
     pub tick_array: WhirlpoolTickArray,
 }
 

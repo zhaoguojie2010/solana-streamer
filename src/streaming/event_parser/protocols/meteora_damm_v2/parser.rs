@@ -1,3 +1,5 @@
+use crate::streaming::event_parser::AccountEvent;
+use crate::streaming::event_parser::InstructionAccounts;
 use crate::streaming::event_parser::{
     common::{EventMetadata, EventType},
     protocols::meteora_damm_v2::{
@@ -8,7 +10,7 @@ use crate::streaming::event_parser::{
         MeteoraDammV2InstructionKind, MeteoraDammV2LiquidityChangeEvent,
         MeteoraDammV2PoolStateAccountEvent, MeteoraDammV2Swap2Event, MeteoraDammV2SwapEvent,
     },
-    DexEvent,
+    TxEvent,
 };
 use solana_sdk::pubkey::Pubkey;
 
@@ -29,9 +31,10 @@ enum LiquidityInstructionKind {
 pub fn parse_meteora_damm_v2_instruction_data(
     discriminator: &[u8],
     data: &[u8],
-    accounts: &[Pubkey],
+    accounts: InstructionAccounts<'_>,
     metadata: EventMetadata,
-) -> Option<DexEvent> {
+    tx: &crate::streaming::event_parser::TxMetadata,
+) -> Option<TxEvent> {
     match discriminator {
         discriminators::SWAP_IX => parse_swap_instruction(data, accounts, metadata),
         discriminators::SWAP2_IX => parse_swap2_instruction(data, accounts, metadata),
@@ -39,10 +42,10 @@ pub fn parse_meteora_damm_v2_instruction_data(
             parse_initialize_pool_instruction(data, accounts, metadata)
         }
         discriminators::INITIALIZE_CUSTOMIZABLE_POOL_IX => {
-            parse_initialize_customizable_pool_instruction(data, accounts, metadata)
+            parse_initialize_customizable_pool_instruction(data, accounts, metadata, tx)
         }
         discriminators::INITIALIZE_POOL_WITH_DYNAMIC_CONFIG_IX => {
-            parse_initialize_pool_with_dynamic_config_instruction(data, accounts, metadata)
+            parse_initialize_pool_with_dynamic_config_instruction(data, accounts, metadata, tx)
         }
         discriminators::ADD_LIQUIDITY_IX => parse_liquidity_change_instruction(
             data,
@@ -91,21 +94,16 @@ pub fn parse_meteora_damm_v2_instruction_data(
 }
 
 fn parse_state_instruction(
-    data: &[u8],
-    accounts: &[Pubkey],
+    _data: &[u8],
+    accounts: InstructionAccounts<'_>,
     mut metadata: EventMetadata,
     kind: MeteoraDammV2InstructionKind,
-) -> Option<DexEvent> {
+) -> Option<TxEvent> {
     if accounts.is_empty() {
         return None;
     }
     metadata.event_type = EventType::MeteoraDammV2Instruction;
-    Some(DexEvent::MeteoraDammV2InstructionEvent(MeteoraDammV2InstructionEvent {
-        metadata,
-        kind,
-        accounts: accounts.to_vec(),
-        data: data.to_vec(),
-    }))
+    Some(TxEvent::MeteoraDammV2InstructionEvent(MeteoraDammV2InstructionEvent { metadata, kind }))
 }
 
 /// 解析 Meteora DAMM v2 inner instruction data (CPI events)
@@ -115,7 +113,7 @@ pub fn parse_meteora_damm_v2_inner_instruction_data(
     discriminator: &[u8],
     data: &[u8],
     metadata: EventMetadata,
-) -> Option<DexEvent> {
+) -> Option<TxEvent> {
     match discriminator {
         discriminators::SWAP_EVENT => parse_swap_inner_instruction(data, metadata),
         discriminators::INITIALIZE_POOL_EVENT => {
@@ -133,21 +131,23 @@ pub fn parse_meteora_damm_v2_inner_instruction_data(
 /// 根据判别器路由到具体的账户解析函数。目前仅支持 pool state 账户。
 pub fn parse_meteora_damm_v2_account_data(
     discriminator: &[u8],
-    account: crate::streaming::grpc::AccountPretty,
+    account: crate::streaming::grpc::AccountFrame,
     mut metadata: EventMetadata,
-) -> Option<DexEvent> {
+) -> Option<AccountEvent> {
     match discriminator {
         discriminators::POOL_STATE_ACCOUNT => {
             metadata.event_type = EventType::AccountMeteoraDammV2PoolState;
-            Some(DexEvent::MeteoraDammV2PoolStateAccountEvent(MeteoraDammV2PoolStateAccountEvent {
-                metadata,
-                pubkey: account.pubkey,
-                executable: account.executable,
-                lamports: account.lamports,
-                owner: account.owner,
-                rent_epoch: account.rent_epoch,
-                raw_account_data: account.data,
-            }))
+            Some(AccountEvent::MeteoraDammV2PoolStateAccountEvent(
+                MeteoraDammV2PoolStateAccountEvent {
+                    metadata,
+                    pubkey: account.pubkey,
+                    executable: account.executable,
+                    lamports: account.lamports,
+                    owner: account.owner,
+                    rent_epoch: account.rent_epoch,
+                    raw_account_data: account.data,
+                },
+            ))
         }
         _ => None,
     }
@@ -156,9 +156,9 @@ pub fn parse_meteora_damm_v2_account_data(
 /// 解析 swap 指令
 fn parse_swap_instruction(
     data: &[u8],
-    accounts: &[Pubkey],
+    accounts: InstructionAccounts<'_>,
     mut metadata: EventMetadata,
-) -> Option<DexEvent> {
+) -> Option<TxEvent> {
     metadata.event_type = EventType::MeteoraDammV2Swap;
 
     if data.len() < 16 || accounts.len() < 14 {
@@ -169,22 +169,22 @@ fn parse_swap_instruction(
     let amount_in = u64::from_le_bytes(data[0..8].try_into().unwrap());
     let minimum_amount_out = u64::from_le_bytes(data[8..16].try_into().unwrap());
 
-    Some(DexEvent::MeteoraDammV2SwapEvent(MeteoraDammV2SwapEvent {
+    Some(TxEvent::MeteoraDammV2SwapEvent(MeteoraDammV2SwapEvent {
         metadata,
-        pool_authority: accounts[0],
-        pool: accounts[1],
-        input_token_account: accounts[2],
-        output_token_account: accounts[3],
-        token_a_vault: accounts[4],
-        token_b_vault: accounts[5],
-        token_a_mint: accounts[6],
-        token_b_mint: accounts[7],
-        payer: accounts[8],
-        token_a_program: accounts[9],
-        token_b_program: accounts[10],
-        referral_token_account: Some(accounts[11]),
-        event_authority: accounts[12],
-        program: accounts[13],
+        pool_authority: *accounts.get(0)?,
+        pool: *accounts.get(1)?,
+        input_token_account: *accounts.get(2)?,
+        output_token_account: *accounts.get(3)?,
+        token_a_vault: *accounts.get(4)?,
+        token_b_vault: *accounts.get(5)?,
+        token_a_mint: *accounts.get(6)?,
+        token_b_mint: *accounts.get(7)?,
+        payer: *accounts.get(8)?,
+        token_a_program: *accounts.get(9)?,
+        token_b_program: *accounts.get(10)?,
+        referral_token_account: Some(*accounts.get(11)?),
+        event_authority: *accounts.get(12)?,
+        program: *accounts.get(13)?,
         amount_0: amount_in,
         amount_1: minimum_amount_out,
         ..Default::default()
@@ -194,9 +194,9 @@ fn parse_swap_instruction(
 /// 解析 swap2 指令
 fn parse_swap2_instruction(
     data: &[u8],
-    accounts: &[Pubkey],
+    accounts: InstructionAccounts<'_>,
     mut metadata: EventMetadata,
-) -> Option<DexEvent> {
+) -> Option<TxEvent> {
     metadata.event_type = EventType::MeteoraDammV2Swap2;
 
     if data.len() < 17 || accounts.len() < 14 {
@@ -211,24 +211,24 @@ fn parse_swap2_instruction(
     // SwapCtx always has 14 fixed accounts. Anchor represents an absent
     // optional referral with the DAMM v2 program ID at position 11; any
     // instruction sysvar used by the rate limiter is a remaining account.
-    let has_referral = accounts[11] != METEORA_DAMM_V2_PROGRAM_ID;
+    let has_referral = *accounts.get(11)? != METEORA_DAMM_V2_PROGRAM_ID;
 
-    Some(DexEvent::MeteoraDammV2Swap2Event(MeteoraDammV2Swap2Event {
+    Some(TxEvent::MeteoraDammV2Swap2Event(MeteoraDammV2Swap2Event {
         metadata,
-        pool_authority: accounts[0],
-        pool: accounts[1],
-        input_token_account: accounts[2],
-        output_token_account: accounts[3],
-        token_a_vault: accounts[4],
-        token_b_vault: accounts[5],
-        token_a_mint: accounts[6],
-        token_b_mint: accounts[7],
-        payer: accounts[8],
-        token_a_program: accounts[9],
-        token_b_program: accounts[10],
-        referral_token_account: has_referral.then_some(accounts[11]),
-        event_authority: accounts[12],
-        program: accounts[13],
+        pool_authority: *accounts.get(0)?,
+        pool: *accounts.get(1)?,
+        input_token_account: *accounts.get(2)?,
+        output_token_account: *accounts.get(3)?,
+        token_a_vault: *accounts.get(4)?,
+        token_b_vault: *accounts.get(5)?,
+        token_a_mint: *accounts.get(6)?,
+        token_b_mint: *accounts.get(7)?,
+        payer: *accounts.get(8)?,
+        token_a_program: *accounts.get(9)?,
+        token_b_program: *accounts.get(10)?,
+        referral_token_account: has_referral.then_some(*accounts.get(11)?),
+        event_authority: *accounts.get(12)?,
+        program: *accounts.get(13)?,
         sysvar: accounts.get(14).copied().unwrap_or_default(),
         amount_0,
         amount_1,
@@ -241,9 +241,9 @@ fn parse_swap2_instruction(
 /// 解析 initialize_pool 指令
 fn parse_initialize_pool_instruction(
     data: &[u8],
-    accounts: &[Pubkey],
+    accounts: InstructionAccounts<'_>,
     mut metadata: EventMetadata,
-) -> Option<DexEvent> {
+) -> Option<TxEvent> {
     metadata.event_type = EventType::MeteoraDammV2InitializePool;
 
     if accounts.len() < 20 {
@@ -275,27 +275,27 @@ fn parse_initialize_pool_instruction(
         None
     };
 
-    Some(DexEvent::MeteoraDammV2InitializePoolEvent(MeteoraDammV2InitializePoolEvent {
+    Some(TxEvent::MeteoraDammV2InitializePoolEvent(MeteoraDammV2InitializePoolEvent {
         metadata,
-        creator: accounts[0],
-        position_nft_mint: accounts[1],
-        position_nft_account: accounts[2],
-        payer: accounts[3],
-        config: accounts[4],
-        pool_authority: accounts[5],
-        pool: accounts[6],
-        position: accounts[7],
-        token_a_mint: accounts[8],
-        token_b_mint: accounts[9],
-        token_a_vault: accounts[10],
-        token_b_vault: accounts[11],
-        payer_token_a: accounts[12],
-        payer_token_b: accounts[13],
-        token_a_program: accounts[14],
-        token_b_program: accounts[15],
-        event_authority: accounts[18],
-        program: accounts[19],
-        remaining_accounts: accounts[20..].to_vec(),
+        creator: *accounts.get(0)?,
+        position_nft_mint: *accounts.get(1)?,
+        position_nft_account: *accounts.get(2)?,
+        payer: *accounts.get(3)?,
+        config: *accounts.get(4)?,
+        pool_authority: *accounts.get(5)?,
+        pool: *accounts.get(6)?,
+        position: *accounts.get(7)?,
+        token_a_mint: *accounts.get(8)?,
+        token_b_mint: *accounts.get(9)?,
+        token_a_vault: *accounts.get(10)?,
+        token_b_vault: *accounts.get(11)?,
+        payer_token_a: *accounts.get(12)?,
+        payer_token_b: *accounts.get(13)?,
+        token_a_program: *accounts.get(14)?,
+        token_b_program: *accounts.get(15)?,
+        event_authority: *accounts.get(18)?,
+        program: *accounts.get(19)?,
+        remaining_account_indices: accounts.indices_from(20).collect(),
         liquidity,
         sqrt_price,
         activation_point: activation_point.unwrap_or_default(),
@@ -306,9 +306,10 @@ fn parse_initialize_pool_instruction(
 /// 解析 initialize_customizable_pool 指令
 fn parse_initialize_customizable_pool_instruction(
     data: &[u8],
-    accounts: &[Pubkey],
+    accounts: InstructionAccounts<'_>,
     mut metadata: EventMetadata,
-) -> Option<DexEvent> {
+    tx: &crate::streaming::event_parser::TxMetadata,
+) -> Option<TxEvent> {
     metadata.event_type = EventType::MeteoraDammV2InitializeCustomizablePool;
 
     if accounts.len() < 19 {
@@ -376,35 +377,35 @@ fn parse_initialize_customizable_pool_instruction(
     };
     let activation_point = activation_point.unwrap_or_else(|| {
         if activation_type == 0 {
-            metadata.slot
+            tx.slot
         } else {
-            u64::try_from(metadata.block_time.max(0)).unwrap_or_default()
+            u64::try_from(tx.block_time.max(0)).unwrap_or_default()
         }
     });
 
-    Some(DexEvent::MeteoraDammV2InitializeCustomizablePoolEvent(
+    Some(TxEvent::MeteoraDammV2InitializeCustomizablePoolEvent(
         MeteoraDammV2InitializeCustomizablePoolEvent {
             metadata,
-            creator: accounts[0],
-            position_nft_mint: accounts[1],
-            position_nft_account: accounts[2],
-            payer: accounts[3],
-            pool_authority: accounts[4],
-            pool: accounts[5],
-            position: accounts[6],
-            token_a_mint: accounts[7],
-            token_b_mint: accounts[8],
-            token_a_vault: accounts[9],
-            token_b_vault: accounts[10],
-            payer_token_a: accounts[11],
-            payer_token_b: accounts[12],
-            token_a_program: accounts[13],
-            token_b_program: accounts[14],
-            token_2022_program: accounts[15],
-            system_program: accounts[16],
-            event_authority: accounts[17],
-            program: accounts[18],
-            remaining_accounts: accounts[19..].to_vec(),
+            creator: *accounts.get(0)?,
+            position_nft_mint: *accounts.get(1)?,
+            position_nft_account: *accounts.get(2)?,
+            payer: *accounts.get(3)?,
+            pool_authority: *accounts.get(4)?,
+            pool: *accounts.get(5)?,
+            position: *accounts.get(6)?,
+            token_a_mint: *accounts.get(7)?,
+            token_b_mint: *accounts.get(8)?,
+            token_a_vault: *accounts.get(9)?,
+            token_b_vault: *accounts.get(10)?,
+            payer_token_a: *accounts.get(11)?,
+            payer_token_b: *accounts.get(12)?,
+            token_a_program: *accounts.get(13)?,
+            token_b_program: *accounts.get(14)?,
+            token_2022_program: *accounts.get(15)?,
+            system_program: *accounts.get(16)?,
+            event_authority: *accounts.get(17)?,
+            program: *accounts.get(18)?,
+            remaining_account_indices: accounts.indices_from(19).collect(),
             pool_fees,
             sqrt_min_price,
             sqrt_max_price,
@@ -421,9 +422,10 @@ fn parse_initialize_customizable_pool_instruction(
 /// 解析 initialize_pool_with_dynamic_config 指令
 fn parse_initialize_pool_with_dynamic_config_instruction(
     data: &[u8],
-    accounts: &[Pubkey],
+    accounts: InstructionAccounts<'_>,
     mut metadata: EventMetadata,
-) -> Option<DexEvent> {
+    tx: &crate::streaming::event_parser::TxMetadata,
+) -> Option<TxEvent> {
     metadata.event_type = EventType::MeteoraDammV2InitializePoolWithDynamicConfig;
 
     if accounts.len() < 21 {
@@ -487,36 +489,36 @@ fn parse_initialize_pool_with_dynamic_config_instruction(
     };
     let activation_point = activation_point.unwrap_or_else(|| {
         if activation_type == 0 {
-            metadata.slot
+            tx.slot
         } else {
-            u64::try_from(metadata.block_time.max(0)).unwrap_or_default()
+            u64::try_from(tx.block_time.max(0)).unwrap_or_default()
         }
     });
 
-    Some(DexEvent::MeteoraDammV2InitializePoolWithDynamicConfigEvent(
+    Some(TxEvent::MeteoraDammV2InitializePoolWithDynamicConfigEvent(
         MeteoraDammV2InitializePoolWithDynamicConfigEvent {
             metadata,
-            creator: accounts[0],
-            position_nft_mint: accounts[1],
-            position_nft_account: accounts[2],
-            payer: accounts[3],
-            pool_creator_authority: accounts[4],
-            pool_authority: accounts[6],
-            pool: accounts[7],
-            position: accounts[8],
-            token_a_mint: accounts[9],
-            token_b_mint: accounts[10],
-            token_a_vault: accounts[11],
-            token_b_vault: accounts[12],
-            payer_token_a: accounts[13],
-            payer_token_b: accounts[14],
-            token_a_program: accounts[15],
-            token_b_program: accounts[16],
-            token_2022_program: accounts[17],
-            system_program: accounts[18],
-            event_authority: accounts[19],
-            program: accounts[20],
-            config: accounts[5],
+            creator: *accounts.get(0)?,
+            position_nft_mint: *accounts.get(1)?,
+            position_nft_account: *accounts.get(2)?,
+            payer: *accounts.get(3)?,
+            pool_creator_authority: *accounts.get(4)?,
+            pool_authority: *accounts.get(6)?,
+            pool: *accounts.get(7)?,
+            position: *accounts.get(8)?,
+            token_a_mint: *accounts.get(9)?,
+            token_b_mint: *accounts.get(10)?,
+            token_a_vault: *accounts.get(11)?,
+            token_b_vault: *accounts.get(12)?,
+            payer_token_a: *accounts.get(13)?,
+            payer_token_b: *accounts.get(14)?,
+            token_a_program: *accounts.get(15)?,
+            token_b_program: *accounts.get(16)?,
+            token_2022_program: *accounts.get(17)?,
+            system_program: *accounts.get(18)?,
+            event_authority: *accounts.get(19)?,
+            program: *accounts.get(20)?,
+            config: *accounts.get(5)?,
             pool_fees,
             sqrt_min_price,
             sqrt_max_price,
@@ -534,10 +536,10 @@ fn parse_initialize_pool_with_dynamic_config_instruction(
 /// The CPI event later replaces these instruction-derived fields with authoritative values.
 fn parse_liquidity_change_instruction(
     data: &[u8],
-    accounts: &[Pubkey],
+    accounts: InstructionAccounts<'_>,
     mut metadata: EventMetadata,
     kind: LiquidityInstructionKind,
-) -> Option<DexEvent> {
+) -> Option<TxEvent> {
     let (pool_index, position_index, change_type, liquidity_delta, threshold_offset) = match kind {
         LiquidityInstructionKind::Add => {
             (0, 1, 0, u128::from_le_bytes(data.get(..16)?.try_into().ok()?), 16)
@@ -553,7 +555,7 @@ fn parse_liquidity_change_instruction(
         u64::from_le_bytes(data.get(threshold_offset + 8..threshold_offset + 16)?.try_into().ok()?);
 
     metadata.event_type = EventType::MeteoraDammV2LiquidityChange;
-    Some(DexEvent::MeteoraDammV2LiquidityChangeEvent(MeteoraDammV2LiquidityChangeEvent {
+    Some(TxEvent::MeteoraDammV2LiquidityChangeEvent(MeteoraDammV2LiquidityChangeEvent {
         metadata,
         pool: accounts.get(pool_index).copied()?,
         position: accounts.get(position_index).copied()?,
@@ -566,9 +568,9 @@ fn parse_liquidity_change_instruction(
 }
 
 /// 解析 swap inner instruction (CPI event)
-fn parse_swap_inner_instruction(data: &[u8], metadata: EventMetadata) -> Option<DexEvent> {
+fn parse_swap_inner_instruction(data: &[u8], metadata: EventMetadata) -> Option<TxEvent> {
     if let Some(event) = meteora_damm_v2_swap_event_decode(data) {
-        Some(DexEvent::MeteoraDammV2SwapEvent(MeteoraDammV2SwapEvent { metadata, ..event }))
+        Some(TxEvent::MeteoraDammV2SwapEvent(MeteoraDammV2SwapEvent { metadata, ..event }))
     } else {
         None
     }
@@ -578,10 +580,10 @@ fn parse_swap_inner_instruction(data: &[u8], metadata: EventMetadata) -> Option<
 fn parse_initialize_pool_inner_instruction(
     data: &[u8],
     mut metadata: EventMetadata,
-) -> Option<DexEvent> {
+) -> Option<TxEvent> {
     metadata.event_type = EventType::MeteoraDammV2InitializePool;
     if let Some(event) = meteora_damm_v2_initialize_pool_event_decode(data) {
-        Some(DexEvent::MeteoraDammV2InitializePoolEvent(MeteoraDammV2InitializePoolEvent {
+        Some(TxEvent::MeteoraDammV2InitializePoolEvent(MeteoraDammV2InitializePoolEvent {
             metadata,
             ..event
         }))
@@ -594,12 +596,43 @@ fn parse_initialize_pool_inner_instruction(
 fn parse_liquidity_change_inner_instruction(
     data: &[u8],
     mut metadata: EventMetadata,
-) -> Option<DexEvent> {
+) -> Option<TxEvent> {
     metadata.event_type = EventType::MeteoraDammV2LiquidityChange;
     meteora_damm_v2_liquidity_change_event_decode(data).map(|event| {
-        DexEvent::MeteoraDammV2LiquidityChangeEvent(MeteoraDammV2LiquidityChangeEvent {
+        TxEvent::MeteoraDammV2LiquidityChangeEvent(MeteoraDammV2LiquidityChangeEvent {
             metadata,
             ..event
         })
     })
+}
+
+/// Classify before allocating or decoding a protocol instruction.
+pub(crate) fn instruction_event_type(discriminator: &[u8]) -> Option<EventType> {
+    match discriminator {
+        discriminators::SWAP_IX => Some(EventType::MeteoraDammV2Swap),
+        discriminators::SWAP2_IX => Some(EventType::MeteoraDammV2Swap2),
+        discriminators::INITIALIZE_POOL_IX => Some(EventType::MeteoraDammV2InitializePool),
+        discriminators::INITIALIZE_CUSTOMIZABLE_POOL_IX => {
+            Some(EventType::MeteoraDammV2InitializeCustomizablePool)
+        }
+        discriminators::INITIALIZE_POOL_WITH_DYNAMIC_CONFIG_IX => {
+            Some(EventType::MeteoraDammV2InitializePoolWithDynamicConfig)
+        }
+        discriminators::ADD_LIQUIDITY_IX => Some(EventType::MeteoraDammV2LiquidityChange),
+        discriminators::REMOVE_LIQUIDITY_IX => Some(EventType::MeteoraDammV2LiquidityChange),
+        discriminators::REMOVE_ALL_LIQUIDITY_IX => Some(EventType::MeteoraDammV2LiquidityChange),
+        discriminators::SET_POOL_STATUS_IX => Some(EventType::MeteoraDammV2Instruction),
+        discriminators::UPDATE_POOL_FEES_IX => Some(EventType::MeteoraDammV2Instruction),
+        discriminators::FIX_POOL_FEE_PARAMS_IX => Some(EventType::MeteoraDammV2Instruction),
+        discriminators::FIX_POOL_LAYOUT_VERSION_IX => Some(EventType::MeteoraDammV2Instruction),
+        _ => None,
+    }
+}
+
+/// Classify before allocating or decoding a protocol account.
+pub(crate) fn account_event_type(discriminator: &[u8]) -> Option<EventType> {
+    match discriminator {
+        discriminators::POOL_STATE_ACCOUNT => Some(EventType::AccountMeteoraDammV2PoolState),
+        _ => None,
+    }
 }

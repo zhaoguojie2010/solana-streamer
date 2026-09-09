@@ -1,0 +1,83 @@
+{
+  "layout_bytes": {
+    "AccountEvent": 11520,
+    "EventMetadata": 80,
+    "TxEvent": 1136
+  },
+  "profile": "release; normalized inputs; warmed parser; timing and allocation passes separate",
+  "results": [
+    {
+      "allocated_bytes_per_frame": 11.18526,
+      "allocations_per_frame": 0.22912,
+      "case": "protocol_mix_borrowed",
+      "events": 48958,
+      "frames": 50000,
+      "mean_ns": 294,
+      "p50_ns": 260,
+      "p95_ns": 526,
+      "p99_ns": 781
+    },
+    {
+      "allocated_bytes_per_frame": 0.0,
+      "allocations_per_frame": 0.0,
+      "case": "20_cpi_borrowed",
+      "events": 1000000,
+      "frames": 50000,
+      "mean_ns": 3005,
+      "p50_ns": 2600,
+      "p95_ns": 4324,
+      "p99_ns": 5134
+    },
+    {
+      "allocated_bytes_per_frame": 0.0,
+      "allocations_per_frame": 0.0,
+      "case": "protocol_mix_excluded",
+      "events": 0,
+      "frames": 50000,
+      "mean_ns": 85,
+      "p50_ns": 86,
+      "p95_ns": 96,
+      "p99_ns": 154
+    },
+    {
+      "allocated_bytes_per_frame": 1123.51102,
+      "allocations_per_frame": 1.20828,
+      "case": "protocol_mix_owned",
+      "events": 48958,
+      "frames": 50000,
+      "mean_ns": 574,
+      "p50_ns": 540,
+      "p95_ns": 800,
+      "p99_ns": 1033
+    },
+    {
+      "allocated_bytes_per_frame": 22720.0,
+      "allocations_per_frame": 1.0,
+      "case": "20_cpi_owned",
+      "events": 1000000,
+      "frames": 50000,
+      "mean_ns": 3100,
+      "p50_ns": 2734,
+      "p95_ns": 4798,
+      "p99_ns": 5331
+    }
+  ],
+  "environment": {
+    "date": "2026-09-09",
+    "rustc": "1.97.1 (8bab26f4f 2026-07-14)",
+    "target": "x86_64-unknown-linux-gnu",
+    "cpu": "Intel Core Processor (Skylake, IBRS, no TSX)",
+    "visible_cpus": 3,
+    "source": "uncommitted batch architecture implementation based on 41878e0",
+    "command": "REPLAY_ITERS=50000 cargo bench --bench parser_replay --offline",
+    "fixture_sha256": "8b74841d0dde00f7cefc5f207e268b473f602456df660b3f4e2669f472fa3c92"
+  },
+  "scope": [
+    "Synthetic inputs; all ten protocols; default ParseOptions except empty event selection in excluded case.",
+    "No network, protobuf decoding, queueing, logging or metrics in the timed parser calls.",
+    "Owned input reconstruction and output destruction are outside timing and allocation scopes.",
+    "Allocation bytes are total requested alloc/realloc bytes, not copied bytes or RSS.",
+    "Host scheduling and CPU frequency are not isolated; this run is not a production throughput guarantee.",
+    "The PumpFun migrate fixture has no matching CPI execution event, so it produces no batch."
+  ]
+}

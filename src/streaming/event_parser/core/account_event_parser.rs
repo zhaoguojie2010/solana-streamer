@@ -1,9 +1,10 @@
-use crate::streaming::event_parser::common::filter::EventTypeFilter;
-use crate::streaming::event_parser::common::high_performance_clock::elapsed_micros_since;
-use crate::streaming::event_parser::common::{EventMetadata, EventType, ProtocolType};
-use crate::streaming::event_parser::core::traits::DexEvent;
-use crate::streaming::event_parser::Protocol;
-use crate::streaming::grpc::AccountPretty;
+//! Account classification precedes optional snapshot decoding.
+use super::dispatcher::EventDispatcher;
+use crate::streaming::event_parser::{
+    common::{EventMetadata, EventType, ProtocolType},
+    AccountEvent, ParsePlan,
+};
+use crate::streaming::grpc::AccountFrame;
 use serde::{Deserialize, Serialize};
 use solana_account_decoder::parse_nonce::parse_nonce;
 use solana_sdk::pubkey::Pubkey;
@@ -53,196 +54,141 @@ pub struct TokenInfoEvent {
     pub decimals: u8,
 }
 
-pub struct AccountEventParser {}
-
-impl AccountEventParser {
-    pub fn parse_account_event(
-        protocols: &[Protocol],
-        account: AccountPretty,
-        event_type_filter: Option<&EventTypeFilter>,
-    ) -> Option<DexEvent> {
-        use crate::streaming::event_parser::core::dispatcher::EventDispatcher;
-
-        // 1. 尝试从账户 discriminator 解析（协议特定账户）
-        if account.data.len() >= 8 {
-            let discriminator = <[u8; 8]>::try_from(&account.data[0..8]).ok()?;
-
-            // 尝试识别协议类型
-            if let Some(protocol) = EventDispatcher::match_protocol_by_program_id(&account.owner) {
-                // 检查是否在请求的协议列表中
-                if protocols.contains(&protocol) {
-                    // 构建临时元数据（protocol会被dispatcher设置，event_type会在parser中设置）
-                    let metadata = EventMetadata {
-                        slot: account.slot,
-                        account_write_version: Some(account.write_version),
-                        is_startup: account.is_startup,
-                        signature: account.signature,
-                        protocol: ProtocolType::Common, // 会被 EventDispatcher::dispatch_account 设置
-                        event_type: EventType::default(), // 会被具体 parser 设置
-                        program_id: account.owner,
-                        recv_us: account.recv_us,
-                        handle_us: elapsed_micros_since(account.recv_us),
-                        ..Default::default()
-                    };
-
-                    // 使用 dispatcher 解析
-                    if let Some(event) = EventDispatcher::dispatch_account(
-                        protocol,
-                        &discriminator,
-                        account,
-                        metadata,
-                    ) {
-                        // 应用事件类型过滤
-                        if let Some(filter) = event_type_filter {
-                            if filter.include.contains(&event.metadata().event_type) {
-                                return Some(event);
-                            }
-                            // 不匹配过滤器，继续尝试其他解析方式
-                        } else {
-                            return Some(event);
-                        }
-                    }
-                    // 协议账户解析失败时直接返回，避免进入通用账户解析分支
-                    return None;
-                }
-            }
-        }
-
-        // 2. 尝试解析特殊账户类型（Token、Nonce等）
-        // 这些是通用的，不属于特定协议
+#[derive(Clone, Copy, Debug)]
+pub struct AccountView<'a> {
+    pub frame: &'a AccountFrame,
+    pub event_type: EventType,
+}
+impl AccountFrame {
+    pub fn view<'a>(&'a self, plan: &ParsePlan) -> Option<AccountView<'a>> {
+        let event_type = account_event_type(self, plan)?;
+        plan.includes(event_type).then_some(AccountView { frame: self, event_type })
+    }
+}
+impl AccountView<'_> {
+    pub fn bytes(&self) -> &[u8] {
+        &self.frame.data
+    }
+    pub fn u64_at(&self, offset: usize) -> Option<u64> {
+        Some(u64::from_le_bytes(self.bytes().get(offset..offset.checked_add(8)?)?.try_into().ok()?))
+    }
+    pub fn u128_at(&self, offset: usize) -> Option<u128> {
+        Some(u128::from_le_bytes(
+            self.bytes().get(offset..offset.checked_add(16)?)?.try_into().ok()?,
+        ))
+    }
+    pub fn pubkey_at(&self, offset: usize) -> Option<Pubkey> {
+        Some(Pubkey::new_from_array(
+            self.bytes().get(offset..offset.checked_add(32)?)?.try_into().ok()?,
+        ))
+    }
+    /// Decode only when requested. Cache the returned snapshot in the consumer if needed.
+    /// Cloning the frame here shares `Bytes`; it does not copy the account payload.
+    pub fn decode(&self) -> Option<AccountEvent> {
         let metadata = EventMetadata {
-            slot: account.slot,
-            account_write_version: Some(account.write_version),
-            is_startup: account.is_startup,
-            signature: account.signature,
+            event_type: self.event_type,
             protocol: ProtocolType::Common,
-            event_type: EventType::default(),
-            program_id: account.owner,
-            recv_us: account.recv_us,
-            handle_us: elapsed_micros_since(account.recv_us),
-            ..Default::default()
+            program_id: self.frame.owner,
+            ..EventMetadata::default()
         };
-
-        // 尝试解析 Nonce 账户
-        if let Some(event) = Self::parse_nonce_account_event(&account, metadata.clone()) {
-            if let Some(filter) = event_type_filter {
-                if filter.include.contains(&event.metadata().event_type) {
-                    return Some(event);
-                }
-            } else {
-                return Some(event);
-            }
+        if let Some(protocol) = EventDispatcher::match_protocol_by_program_id(&self.frame.owner) {
+            return EventDispatcher::dispatch_account(
+                protocol,
+                self.bytes().get(..8)?,
+                self.frame.clone(),
+                metadata,
+            );
         }
-
-        // 尝试解析 Token 账户
-        if let Some(event) = Self::parse_token_account_event(&account, metadata) {
-            if let Some(filter) = event_type_filter {
-                if filter.include.contains(&event.metadata().event_type) {
-                    return Some(event);
-                }
-            } else {
-                return Some(event);
+        match self.event_type {
+            EventType::TokenAccount => parse_token(self.frame, metadata),
+            EventType::NonceAccount => {
+                let solana_account_decoder::parse_nonce::UiNonceState::Initialized(details) =
+                    parse_nonce(self.bytes()).ok()?
+                else {
+                    return None;
+                };
+                Some(AccountEvent::NonceAccountEvent(NonceAccountEvent {
+                    metadata,
+                    pubkey: self.frame.pubkey,
+                    executable: self.frame.executable,
+                    lamports: self.frame.lamports,
+                    owner: self.frame.owner,
+                    rent_epoch: self.frame.rent_epoch,
+                    nonce: details.blockhash,
+                    authority: details.authority,
+                }))
             }
+            _ => None,
         }
-
-        None
     }
-
-    pub fn parse_token_account_event(
-        account: &AccountPretty,
-        mut metadata: EventMetadata,
-    ) -> Option<DexEvent> {
-        metadata.event_type = EventType::TokenAccount;
-
-        let pubkey = account.pubkey;
-        let executable = account.executable;
-        let lamports = account.lamports;
-        let owner = account.owner;
-        let rent_epoch = account.rent_epoch;
-        // Spl Token Mint
-        if account.data.len() >= Mint::LEN {
-            if let Ok(mint) = Mint::unpack_from_slice(&account.data) {
-                let mut event = TokenInfoEvent {
-                    metadata,
-                    pubkey,
-                    executable,
-                    lamports,
-                    owner,
-                    rent_epoch,
-                    supply: mint.supply,
-                    decimals: mint.decimals,
-                };
-                let recv_delta = elapsed_micros_since(account.recv_us);
-                event.metadata.handle_us = recv_delta;
-                return Some(DexEvent::TokenInfoEvent(event));
-            }
-        }
-        // Spl Token2022 Mint
-        if account.data.len() >= Account2022::LEN {
-            if let Ok(mint) = StateWithExtensions::<Mint2022>::unpack(&account.data) {
-                let mut event = TokenInfoEvent {
-                    metadata,
-                    pubkey,
-                    executable,
-                    lamports,
-                    owner,
-                    rent_epoch,
-                    supply: mint.base.supply,
-                    decimals: mint.base.decimals,
-                };
-                let recv_delta = elapsed_micros_since(account.recv_us);
-                event.metadata.handle_us = recv_delta;
-                return Some(DexEvent::TokenInfoEvent(event));
-            }
-        }
-        let amount = if account.owner.to_bytes() == spl_token_2022::ID.to_bytes() {
-            StateWithExtensions::<Account2022>::unpack(&account.data)
-                .ok()
-                .map(|info| info.base.amount)
-        } else {
-            Account::unpack(&account.data).ok().map(|info| info.amount)
-        };
-
-        let mut event = TokenAccountEvent {
+}
+fn parse_token(account: &AccountFrame, metadata: EventMetadata) -> Option<AccountEvent> {
+    let token2022 = account.owner.to_bytes() == spl_token_2022::ID.to_bytes();
+    let mint = if token2022 {
+        StateWithExtensions::<Mint2022>::unpack(&account.data)
+            .ok()
+            .map(|m| (m.base.supply, m.base.decimals))
+    } else {
+        Mint::unpack(&account.data).ok().map(|m| (m.supply, m.decimals))
+    };
+    if let Some((supply, decimals)) = mint {
+        return Some(AccountEvent::TokenInfoEvent(TokenInfoEvent {
             metadata,
-            pubkey,
-            executable,
-            lamports,
-            owner,
-            rent_epoch,
-            amount,
-            token_owner: account.owner,
-        };
-        let recv_delta = elapsed_micros_since(account.recv_us);
-        event.metadata.handle_us = recv_delta;
-        Some(DexEvent::TokenAccountEvent(event))
+            pubkey: account.pubkey,
+            executable: account.executable,
+            lamports: account.lamports,
+            owner: account.owner,
+            rent_epoch: account.rent_epoch,
+            supply,
+            decimals,
+        }));
     }
-
-    pub fn parse_nonce_account_event(
-        account: &AccountPretty,
-        mut metadata: EventMetadata,
-    ) -> Option<DexEvent> {
-        metadata.event_type = EventType::NonceAccount;
-
-        if let Ok(info) = parse_nonce(&account.data) {
-            match info {
-                solana_account_decoder::parse_nonce::UiNonceState::Initialized(details) => {
-                    let mut event = NonceAccountEvent {
-                        metadata,
-                        pubkey: account.pubkey,
-                        executable: account.executable,
-                        lamports: account.lamports,
-                        owner: account.owner,
-                        rent_epoch: account.rent_epoch,
-                        nonce: details.blockhash,
-                        authority: details.authority,
-                    };
-                    event.metadata.handle_us = elapsed_micros_since(account.recv_us);
-                    return Some(DexEvent::NonceAccountEvent(event));
-                }
-                solana_account_decoder::parse_nonce::UiNonceState::Uninitialized => {}
-            }
+    let (amount, token_owner) = if token2022 {
+        let state = StateWithExtensions::<Account2022>::unpack(&account.data).ok()?;
+        (state.base.amount, state.base.owner)
+    } else {
+        let state = Account::unpack(&account.data).ok()?;
+        (state.amount, state.owner)
+    };
+    Some(AccountEvent::TokenAccountEvent(TokenAccountEvent {
+        metadata,
+        pubkey: account.pubkey,
+        executable: account.executable,
+        lamports: account.lamports,
+        owner: account.owner,
+        rent_epoch: account.rent_epoch,
+        amount: Some(amount),
+        token_owner: Pubkey::new_from_array(token_owner.to_bytes()),
+    }))
+}
+fn account_event_type(account: &AccountFrame, plan: &ParsePlan) -> Option<EventType> {
+    use crate::streaming::event_parser::protocols::*;
+    if let Some(protocol) = EventDispatcher::match_protocol_by_program_id(&account.owner) {
+        if !plan.includes_protocol(protocol) {
+            return None;
         }
-        None
+        let disc = account.data.get(..8)?;
+        return match protocol {
+            Protocol::PancakeSwap => pancakeswap::parser::account_event_type(disc),
+            Protocol::PumpSwap => pumpswap::parser::account_event_type(disc),
+            Protocol::PumpFun => pumpfun::parser::account_event_type(disc),
+            Protocol::Bonk => bonk::parser::account_event_type(disc),
+            Protocol::RaydiumCpmm => raydium_cpmm::parser::account_event_type(disc),
+            Protocol::RaydiumClmm => raydium_clmm::parser::account_event_type(disc),
+            Protocol::RaydiumAmmV4 => raydium_amm_v4::parser::account_event_type(disc),
+            Protocol::MeteoraDammV2 => meteora_damm_v2::parser::account_event_type(disc),
+            Protocol::MeteoraDlmm => meteora_dlmm::parser::account_event_type(disc),
+            Protocol::Whirlpool => whirlpool::parser::account_event_type(disc),
+        };
     }
+    if (account.owner.to_bytes() == spl_token::ID.to_bytes()
+        || account.owner.to_bytes() == spl_token_2022::ID.to_bytes())
+        && account.data.len() >= Mint::LEN
+    {
+        return Some(EventType::TokenAccount);
+    }
+    if account.owner == Pubkey::default() && account.data.len() == 80 {
+        return Some(EventType::NonceAccount);
+    }
+    None
 }
