@@ -63,7 +63,6 @@
 ### Core Capabilities
 - **Real-time Event Streaming**: Subscribe to live trading events from multiple Solana DEX protocols
 - **Yellowstone gRPC Support**: High-performance event subscription using Yellowstone gRPC
-- **ShredStream Support**: Alternative event streaming using ShredStream protocol
 - **Unified Event Interface**: Consistent event handling across all supported protocols
 
 ### Multi-Protocol Support
@@ -87,7 +86,7 @@
 - **High Performance**: Optimized for low-latency event processing
 - **Batch Processing Optimization**: Batch processing events to reduce callback overhead
 - **Performance Monitoring**: Built-in performance metrics monitoring, including event processing speed
-- **Memory Optimization**: Object pooling and caching mechanisms to reduce memory allocations
+- **Memory Optimization**: Move event payloads, share transaction account keys, and borrow CPI instruction buffers to reduce copies and allocations
 - **Flexible Configuration System**: Support for custom batch sizes, backpressure strategies, channel sizes
 - **Preset Configurations**: High-throughput and low-latency preset configurations optimized for different use cases
 - **Backpressure Handling**: Supports blocking and dropping backpressure strategies
@@ -182,7 +181,6 @@ See [Running examples](examples/README.md) for building all examples and configu
 | Description | Run Command | Source Path |
 |------|---------|----------|
 | Monitor transaction events using Yellowstone gRPC | `cargo run --example grpc_example` | [examples/grpc_example.rs](examples/grpc_example.rs) |
-| Monitor transaction events using ShredStream | `cargo run --example shred_example` | [examples/shred_example.rs](examples/shred_example.rs) |
 | Parse Solana mainnet transaction data | `cargo run --example parse_tx_events` | [examples/parse_tx_events.rs](examples/parse_tx_events.rs) |
 | Monitor PancakeSwap V3 swap events (Swap/SwapV2) | `cargo run --example pancakeswap_swap_with_logs` | [examples/pancakeswap_swap_with_logs.rs](examples/pancakeswap_swap_with_logs.rs) |
 | Update filters at runtime | `cargo run --example dynamic_subscription` | [examples/dynamic_subscription.rs](examples/dynamic_subscription.rs) |
@@ -289,7 +287,6 @@ Note: Multiple subscription attempts on the same client return an error.
 ## 🌐 Event Streaming Services
 
 - **Yellowstone gRPC**: High-performance Solana event streaming
-- **ShredStream**: Alternative event streaming protocol
 
 ## 🏗️ Architecture Features
 
@@ -308,7 +305,6 @@ Note: Multiple subscription attempts on the same client return an error.
 ### Streaming Infrastructure
 
 - **Yellowstone gRPC Client**: Optimized for Solana event streaming
-- **ShredStream Client**: Alternative streaming implementation
 - **Async Processing**: Non-blocking event handling
 
 ## 📁 Project Structure
@@ -316,7 +312,6 @@ Note: Multiple subscription attempts on the same client return an error.
 ```
 src/
 ├── common/           # Common functionality and types
-├── protos/           # Protocol buffer definitions
 ├── streaming/        # Event streaming system
 │   ├── event_parser/ # Event parsing system
 │   │   ├── common/   # Common event parsing tools
@@ -329,7 +324,6 @@ src/
 │   │   │   ├── raydium_cpmm/ # Raydium CPMM event parsing
 │   │   │   └── raydium_clmm/ # Raydium CLMM event parsing
 │   │   └── factory.rs # Parser factory
-│   ├── shred_stream.rs # ShredStream client
 │   ├── yellowstone_grpc.rs # Yellowstone gRPC client
 │   └── yellowstone_sub_system.rs # Yellowstone subsystem
 ├── lib.rs            # Main library file

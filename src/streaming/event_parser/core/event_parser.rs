@@ -16,13 +16,13 @@ use crate::streaming::event_parser::{
     DexEvent, Protocol, ResolvedDexInstruction, TxDexEvents, TxExecutionMetaAudit,
     TxExecutionStatus, TxSwapKind, TxTokenBalanceChange,
 };
-use parking_lot::Mutex;
 use prost_types::Timestamp;
 use solana_sdk::{
     message::compiled_instruction::CompiledInstruction, pubkey::Pubkey, signature::Signature,
     transaction::VersionedTransaction,
 };
 use solana_transaction_status::InnerInstructions;
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use yellowstone_grpc_proto::geyser::SubscribeUpdateTransactionInfo;
@@ -49,6 +49,34 @@ const JITO_TIP_ACCOUNTS: &[Pubkey] = &[
 ];
 
 pub struct EventParser {}
+
+/// Borrow protobuf instruction buffers without allocating a temporary instruction.
+#[derive(Clone, Copy)]
+struct InstructionView<'a> {
+    program_id_index: u32,
+    accounts: &'a [u8],
+    data: &'a [u8],
+}
+
+impl<'a> From<&'a yellowstone_grpc_proto::prelude::CompiledInstruction> for InstructionView<'a> {
+    fn from(instruction: &'a yellowstone_grpc_proto::prelude::CompiledInstruction) -> Self {
+        Self {
+            program_id_index: instruction.program_id_index,
+            accounts: &instruction.accounts,
+            data: &instruction.data,
+        }
+    }
+}
+
+impl<'a> From<&'a yellowstone_grpc_proto::prelude::InnerInstruction> for InstructionView<'a> {
+    fn from(instruction: &'a yellowstone_grpc_proto::prelude::InnerInstruction) -> Self {
+        Self {
+            program_id_index: instruction.program_id_index,
+            accounts: &instruction.accounts,
+            data: &instruction.data,
+        }
+    }
+}
 
 #[derive(Clone, Copy)]
 struct MintLeg {
@@ -115,69 +143,90 @@ impl EventParser {
         swap_cu_parse_config: Option<&SwapCuParseConfig>,
         callback: Arc<dyn Fn(DexEvent) + Send + Sync>,
     ) -> anyhow::Result<()> {
-        // 创建适配器回调，将所有权回调转换为引用回调
-        let adapter_callback = Arc::new(move |event: &DexEvent| {
-            callback(event.clone());
-        });
-        if let Some(transition) = grpc_tx.transaction {
-            if let Some(message) = &transition.message {
-                let mut address_table_lookups: Vec<Vec<u8>> = vec![];
-                let mut inner_instructions: Vec<
-                    yellowstone_grpc_proto::solana::storage::confirmed_block::InnerInstructions,
-                > = vec![];
-                let mut log_messages: Vec<String> = vec![];
+        let accounts = Self::grpc_account_keys(&grpc_tx)?;
+        Self::parse_grpc_transaction_inner(
+            protocols,
+            event_type_filter,
+            &grpc_tx,
+            signature,
+            slot,
+            block_time,
+            recv_us,
+            &accounts,
+            bot_wallet,
+            transaction_index,
+            swap_cu_parse_config,
+            &mut |event| callback(event),
+        )
+    }
 
-                if let Some(meta) = grpc_tx.meta {
-                    inner_instructions = meta.inner_instructions;
-                    log_messages = meta.log_messages;
-                    address_table_lookups.reserve(
-                        meta.loaded_writable_addresses.len() + meta.loaded_readonly_addresses.len(),
-                    );
-                    let loaded_writable_addresses = meta.loaded_writable_addresses;
-                    let loaded_readonly_addresses = meta.loaded_readonly_addresses;
-                    address_table_lookups.extend(
-                        loaded_writable_addresses.into_iter().chain(loaded_readonly_addresses),
-                    );
-                }
-
-                let mut accounts_bytes: Vec<Vec<u8>> =
-                    Vec::with_capacity(message.account_keys.len() + address_table_lookups.len());
-                accounts_bytes.extend_from_slice(&message.account_keys);
-                accounts_bytes.extend(address_table_lookups);
-                // 转换为 Pubkey
-                let accounts: Vec<Pubkey> = accounts_bytes
-                    .iter()
-                    .filter_map(|account| {
-                        if account.len() == 32 {
-                            Some(Pubkey::try_from(account.as_slice()).unwrap_or_default())
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
-                // 解析指令事件
-                let instructions = &message.instructions;
-                Self::parse_instruction_events_from_grpc_transaction(
-                    protocols,
-                    event_type_filter,
-                    &instructions,
-                    signature,
-                    slot,
-                    block_time,
-                    recv_us,
-                    &accounts,
-                    &inner_instructions,
-                    &log_messages,
-                    bot_wallet,
-                    transaction_index,
-                    swap_cu_parse_config,
-                    adapter_callback,
+    /// Construct the transaction account table once, preserving protobuf index order.
+    fn grpc_account_keys(grpc_tx: &SubscribeUpdateTransactionInfo) -> anyhow::Result<Vec<Pubkey>> {
+        let Some(message) = grpc_tx.transaction.as_ref().and_then(|tx| tx.message.as_ref()) else {
+            return Ok(Vec::new());
+        };
+        let (writable, readonly) = grpc_tx
+            .meta
+            .as_ref()
+            .map(|meta| {
+                (
+                    meta.loaded_writable_addresses.as_slice(),
+                    meta.loaded_readonly_addresses.as_slice(),
                 )
-                .await?;
-            }
+            })
+            .unwrap_or_default();
+        let mut accounts =
+            Vec::with_capacity(message.account_keys.len() + writable.len() + readonly.len());
+        for (index, raw) in message.account_keys.iter().chain(writable).chain(readonly).enumerate()
+        {
+            // Dropping malformed keys would shift every subsequent instruction index.
+            let key = Pubkey::try_from(raw.as_slice()).map_err(|error| {
+                anyhow::anyhow!("invalid transaction account key at index {index}: {error}")
+            })?;
+            accounts.push(key);
         }
+        Ok(accounts)
+    }
 
-        Ok(())
+    #[allow(clippy::too_many_arguments)]
+    fn parse_grpc_transaction_inner(
+        protocols: &[Protocol],
+        event_type_filter: Option<&EventTypeFilter>,
+        grpc_tx: &SubscribeUpdateTransactionInfo,
+        signature: Signature,
+        slot: Option<u64>,
+        block_time: Option<Timestamp>,
+        recv_us: i64,
+        accounts: &[Pubkey],
+        bot_wallet: Option<Pubkey>,
+        transaction_index: Option<u64>,
+        swap_cu_parse_config: Option<&SwapCuParseConfig>,
+        callback: &mut impl FnMut(DexEvent),
+    ) -> anyhow::Result<()> {
+        let Some(message) = grpc_tx.transaction.as_ref().and_then(|tx| tx.message.as_ref()) else {
+            return Ok(());
+        };
+        let (inner_instructions, log_messages) = grpc_tx
+            .meta
+            .as_ref()
+            .map(|meta| (meta.inner_instructions.as_slice(), meta.log_messages.as_slice()))
+            .unwrap_or_default();
+        Self::parse_instruction_events_from_grpc_transaction(
+            protocols,
+            event_type_filter,
+            &message.instructions,
+            signature,
+            slot,
+            block_time,
+            recv_us,
+            accounts,
+            inner_instructions,
+            log_messages,
+            bot_wallet,
+            transaction_index,
+            swap_cu_parse_config,
+            callback,
+        )
     }
 
     /// Collect all DEX events parsed from one gRPC transaction without reordering them.
@@ -196,36 +245,33 @@ impl EventParser {
         tx_exec_meta_audit: bool,
     ) -> anyhow::Result<Option<TxDexEvents>> {
         let block_unix_timestamp = block_time.as_ref().map(|time| time.seconds);
-        let has_jito_tip = Self::grpc_transaction_has_jito_tip(&grpc_tx);
-        let tx_exec_meta = tx_exec_meta_audit.then(|| Self::collect_tx_exec_meta(&grpc_tx));
+        let accounts = Self::grpc_account_keys(&grpc_tx)?;
+        let has_jito_tip = Self::grpc_transaction_has_jito_tip(&grpc_tx, &accounts);
+        let tx_exec_meta =
+            tx_exec_meta_audit.then(|| Self::collect_tx_exec_meta(&grpc_tx, &accounts));
         let execution_status = match grpc_tx.meta.as_ref() {
             Some(meta) if meta.err.is_none() => TxExecutionStatus::Success,
             Some(_) => TxExecutionStatus::Failed,
             None => TxExecutionStatus::Unknown,
         };
-        let raw_dex_instructions = Self::collect_grpc_raw_dex_instructions(protocols, &grpc_tx);
-        let events = Arc::new(Mutex::new(Vec::new()));
-        let collected = events.clone();
-        let callback = Arc::new(move |event: DexEvent| {
-            collected.lock().push(event);
-        });
+        let raw_dex_instructions =
+            Self::collect_grpc_raw_dex_instructions(protocols, &grpc_tx, &accounts);
+        let mut events = Vec::new();
 
-        Self::parse_grpc_transaction(
+        Self::parse_grpc_transaction_inner(
             protocols,
             event_type_filter,
-            grpc_tx,
+            &grpc_tx,
             signature,
             slot,
             block_time,
             recv_us,
+            &accounts,
             bot_wallet,
             transaction_index,
             swap_cu_parse_config,
-            callback,
-        )
-        .await?;
-
-        let events = events.lock().clone();
+            &mut |event| events.push(event),
+        )?;
         if events.is_empty() && raw_dex_instructions.is_empty() {
             return Ok(None);
         }
@@ -275,13 +321,40 @@ impl EventParser {
         _swap_cu_parse_config: Option<&SwapCuParseConfig>,
         callback: Arc<dyn Fn(DexEvent) + Send + Sync>,
     ) -> anyhow::Result<()> {
-        // 创建适配器回调，将所有权回调转换为引用回调
-        let adapter_callback = Arc::new(move |event: &DexEvent| {
-            callback(event.clone());
-        });
+        Self::parse_versioned_instruction_events(
+            protocols,
+            event_type_filter,
+            transaction,
+            signature,
+            slot,
+            block_time,
+            recv_us,
+            accounts,
+            inner_instructions,
+            bot_wallet,
+            transaction_index,
+            &mut |event| callback(event),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn parse_versioned_instruction_events(
+        protocols: &[Protocol],
+        event_type_filter: Option<&EventTypeFilter>,
+        transaction: &VersionedTransaction,
+        signature: Signature,
+        slot: Option<u64>,
+        block_time: Option<Timestamp>,
+        recv_us: i64,
+        accounts: &[Pubkey],
+        inner_instructions: &[InnerInstructions],
+        bot_wallet: Option<Pubkey>,
+        transaction_index: Option<u64>,
+        callback: &mut impl FnMut(DexEvent),
+    ) -> anyhow::Result<()> {
         // 获取交易的指令和账户
         let compiled_instructions = transaction.message.instructions();
-        let mut accounts: Vec<Pubkey> = accounts.to_vec();
+        let mut accounts = Cow::Borrowed(accounts);
         // 检查交易中是否包含程序
         let has_program = accounts
             .iter()
@@ -298,7 +371,7 @@ impl EventParser {
                         let max_idx = instruction.accounts.iter().max().unwrap_or(&0);
                         // 补齐accounts(使用Pubkey::default())
                         if *max_idx as usize >= accounts.len() {
-                            accounts.resize(*max_idx as usize + 1, Pubkey::default());
+                            accounts.to_mut().resize(*max_idx as usize + 1, Pubkey::default());
                         }
                         Self::parse_events_from_instruction(
                             protocols,
@@ -314,7 +387,7 @@ impl EventParser {
                             bot_wallet,
                             transaction_index,
                             inner_instructions,
-                            adapter_callback.clone(),
+                            callback,
                         )?;
                     }
                     // Immediately process inner instructions for correct ordering
@@ -336,7 +409,7 @@ impl EventParser {
                                 bot_wallet,
                                 transaction_index,
                                 Some(&inner_instructions),
-                                adapter_callback.clone(),
+                                callback,
                             )?;
                         }
                     }
@@ -362,7 +435,7 @@ impl EventParser {
         transaction_index: Option<u64>,
         entry_index: Option<u64>,
         tx_index_in_entry: Option<u64>,
-        swap_cu_parse_config: Option<&SwapCuParseConfig>,
+        _swap_cu_parse_config: Option<&SwapCuParseConfig>,
     ) -> anyhow::Result<Option<TxDexEvents>> {
         let block_unix_timestamp = block_time.as_ref().map(|time| time.seconds);
         let has_jito_tip =
@@ -373,13 +446,9 @@ impl EventParser {
             accounts,
             inner_instructions,
         );
-        let events = Arc::new(Mutex::new(Vec::new()));
-        let collected = events.clone();
-        let callback = Arc::new(move |event: DexEvent| {
-            collected.lock().push(event);
-        });
+        let mut events = Vec::new();
 
-        Self::parse_instruction_events_from_versioned_transaction(
+        Self::parse_versioned_instruction_events(
             protocols,
             event_type_filter,
             transaction,
@@ -391,12 +460,8 @@ impl EventParser {
             inner_instructions,
             bot_wallet,
             transaction_index,
-            swap_cu_parse_config,
-            callback,
-        )
-        .await?;
-
-        let events = events.lock().clone();
+            &mut |event| events.push(event),
+        )?;
         if events.is_empty() && raw_dex_instructions.is_empty() {
             return Ok(None);
         }
@@ -429,6 +494,7 @@ impl EventParser {
     fn collect_grpc_raw_dex_instructions(
         protocols: &[Protocol],
         grpc_tx: &SubscribeUpdateTransactionInfo,
+        accounts: &[Pubkey],
     ) -> Vec<ResolvedDexInstruction> {
         let Some(transaction) = grpc_tx.transaction.as_ref() else {
             return Vec::new();
@@ -436,28 +502,6 @@ impl EventParser {
         let Some(message) = transaction.message.as_ref() else {
             return Vec::new();
         };
-        let mut accounts = message
-            .account_keys
-            .iter()
-            .filter_map(|raw| Pubkey::try_from(raw.as_slice()).ok())
-            .collect::<Vec<_>>();
-        if accounts.len() != message.account_keys.len() {
-            return Vec::new();
-        }
-        if let Some(meta) = grpc_tx.meta.as_ref() {
-            let loaded = meta
-                .loaded_writable_addresses
-                .iter()
-                .chain(meta.loaded_readonly_addresses.iter())
-                .filter_map(|raw| Pubkey::try_from(raw.as_slice()).ok())
-                .collect::<Vec<_>>();
-            if loaded.len()
-                != meta.loaded_writable_addresses.len() + meta.loaded_readonly_addresses.len()
-            {
-                return Vec::new();
-            }
-            accounts.extend(loaded);
-        }
         let mut resolved = Vec::new();
         for (outer_index, instruction) in message.instructions.iter().enumerate() {
             if let Some(item) = Self::resolve_raw_dex_instruction(
@@ -465,7 +509,7 @@ impl EventParser {
                 instruction.program_id_index,
                 &instruction.accounts,
                 &instruction.data,
-                &accounts,
+                accounts,
                 outer_index as u32,
                 None,
                 None,
@@ -483,7 +527,7 @@ impl EventParser {
                     instruction.program_id_index,
                     &instruction.accounts,
                     &instruction.data,
-                    &accounts,
+                    accounts,
                     outer_index as u32,
                     Some(inner_index as u32),
                     instruction.stack_height,
@@ -571,13 +615,16 @@ impl EventParser {
         })
     }
 
-    fn collect_tx_exec_meta(grpc_tx: &SubscribeUpdateTransactionInfo) -> TxExecutionMetaAudit {
+    fn collect_tx_exec_meta(
+        grpc_tx: &SubscribeUpdateTransactionInfo,
+        accounts: &[Pubkey],
+    ) -> TxExecutionMetaAudit {
         let mut audit = TxExecutionMetaAudit::default();
         let Some(transaction) = grpc_tx.transaction.as_ref() else {
             audit.parse_errors.push("transaction missing".to_string());
             return audit;
         };
-        let Some(message) = transaction.message.as_ref() else {
+        let Some(_) = transaction.message.as_ref() else {
             audit.parse_errors.push("transaction message missing".to_string());
             return audit;
         };
@@ -585,13 +632,6 @@ impl EventParser {
             audit.parse_errors.push("transaction meta missing".to_string());
             return audit;
         };
-        let accounts = message
-            .account_keys
-            .iter()
-            .chain(meta.loaded_writable_addresses.iter())
-            .chain(meta.loaded_readonly_addresses.iter())
-            .map(|raw| Pubkey::try_from(raw.as_slice()).ok())
-            .collect::<Vec<_>>();
         let mut indices = HashSet::new();
         indices.extend(meta.pre_token_balances.iter().map(|balance| balance.account_index));
         indices.extend(meta.post_token_balances.iter().map(|balance| balance.account_index));
@@ -636,8 +676,7 @@ impl EventParser {
                 account_index,
                 account: accounts
                     .get(usize::try_from(account_index).unwrap_or(usize::MAX))
-                    .copied()
-                    .flatten(),
+                    .copied(),
                 mint: template.mint.clone(),
                 owner: template.owner.clone(),
                 program_id: template.program_id.clone(),
@@ -653,32 +692,22 @@ impl EventParser {
         audit
     }
 
-    fn grpc_transaction_has_jito_tip(grpc_tx: &SubscribeUpdateTransactionInfo) -> bool {
+    fn grpc_transaction_has_jito_tip(
+        grpc_tx: &SubscribeUpdateTransactionInfo,
+        accounts: &[Pubkey],
+    ) -> bool {
         let Some(transaction) = grpc_tx.transaction.as_ref() else {
             return false;
         };
         let Some(message) = transaction.message.as_ref() else {
             return false;
         };
-        let mut accounts = message
-            .account_keys
-            .iter()
-            .filter_map(|account| Pubkey::try_from(account.as_slice()).ok())
-            .collect::<Vec<_>>();
-        if let Some(meta) = grpc_tx.meta.as_ref() {
-            accounts.extend(
-                meta.loaded_writable_addresses
-                    .iter()
-                    .chain(meta.loaded_readonly_addresses.iter())
-                    .filter_map(|account| Pubkey::try_from(account.as_slice()).ok()),
-            );
-        }
         if message.instructions.iter().any(|instruction| {
             Self::is_system_transfer_to_jito(
                 instruction.program_id_index as usize,
                 &instruction.accounts,
                 &instruction.data,
-                &accounts,
+                accounts,
             )
         }) {
             return true;
@@ -690,7 +719,7 @@ impl EventParser {
                         instruction.program_id_index as usize,
                         &instruction.accounts,
                         &instruction.data,
-                        &accounts,
+                        accounts,
                     )
                 })
             })
@@ -733,7 +762,7 @@ impl EventParser {
     /// Iterates through all instructions in a gRPC transaction, checks if they should be handled,
     /// and delegates to instruction-level parsing for both outer and inner instructions.
     #[allow(clippy::too_many_arguments)]
-    async fn parse_instruction_events_from_grpc_transaction(
+    fn parse_instruction_events_from_grpc_transaction(
         protocols: &[Protocol],
         event_type_filter: Option<&EventTypeFilter>,
         compiled_instructions: &[yellowstone_grpc_proto::prelude::CompiledInstruction],
@@ -747,10 +776,10 @@ impl EventParser {
         bot_wallet: Option<Pubkey>,
         transaction_index: Option<u64>,
         swap_cu_parse_config: Option<&SwapCuParseConfig>,
-        callback: Arc<dyn for<'a> Fn(&'a DexEvent) + Send + Sync>,
+        callback: &mut impl FnMut(DexEvent),
     ) -> anyhow::Result<()> {
         // 获取交易的指令和账户
-        let mut accounts = accounts.to_vec();
+        let mut accounts = Cow::Borrowed(accounts);
         // 检查交易中是否包含程序
         let has_program = accounts
             .iter()
@@ -781,13 +810,13 @@ impl EventParser {
                     let max_idx = instruction.accounts.iter().max().unwrap_or(&0);
                     // 补齐accounts(使用Pubkey::default())
                     if *max_idx as usize >= accounts.len() {
-                        accounts.resize(*max_idx as usize + 1, Pubkey::default());
+                        accounts.to_mut().resize(*max_idx as usize + 1, Pubkey::default());
                     }
                     if Self::should_handle(protocols, event_type_filter, &program_id) {
                         Self::parse_events_from_grpc_instruction(
                             protocols,
                             event_type_filter,
-                            instruction,
+                            instruction.into(),
                             &accounts,
                             signature,
                             slot.unwrap_or(0),
@@ -804,7 +833,7 @@ impl EventParser {
                             log_messages,
                             compiled_instructions,
                             all_inner_instructions,
-                            callback.clone(),
+                            callback,
                         )?;
                     }
                     // Immediately process inner instructions for correct ordering
@@ -814,14 +843,7 @@ impl EventParser {
                         for (inner_index, inner_instruction) in
                             inner_instructions.instructions.iter().enumerate()
                         {
-                            let inner_accounts = &inner_instruction.accounts;
-                            let data = &inner_instruction.data;
-                            let instruction =
-                                yellowstone_grpc_proto::prelude::CompiledInstruction {
-                                    program_id_index: inner_instruction.program_id_index,
-                                    accounts: inner_accounts.to_vec(),
-                                    data: data.to_vec(),
-                                };
+                            let instruction = InstructionView::from(inner_instruction);
                             if program_data_index.is_none() && !log_messages.is_empty() {
                                 if let Some(program_id) =
                                     accounts.get(instruction.program_id_index as usize)
@@ -845,7 +867,7 @@ impl EventParser {
                             if let Some(inner_event) = Self::parse_event_from_grpc_instruction(
                                 protocols,
                                 event_type_filter,
-                                &instruction,
+                                instruction,
                                 &accounts,
                                 signature,
                                 slot.unwrap_or(0),
@@ -867,7 +889,7 @@ impl EventParser {
                             }
                         }
 
-                        for inner_event in inner_events.iter() {
+                        for inner_event in inner_events {
                             callback(inner_event);
                         }
                     }
@@ -885,7 +907,7 @@ impl EventParser {
     fn parse_events_from_grpc_instruction(
         protocols: &[Protocol],
         event_type_filter: Option<&EventTypeFilter>,
-        instruction: &yellowstone_grpc_proto::prelude::CompiledInstruction,
+        instruction: InstructionView<'_>,
         accounts: &[Pubkey],
         signature: Signature,
         slot: u64,
@@ -902,7 +924,7 @@ impl EventParser {
         log_messages: &[String],
         compiled_instructions: &[yellowstone_grpc_proto::prelude::CompiledInstruction],
         all_inner_instructions: &[yellowstone_grpc_proto::prelude::InnerInstructions],
-        callback: Arc<dyn for<'a> Fn(&'a DexEvent) + Send + Sync>,
+        callback: &mut impl FnMut(DexEvent),
     ) -> anyhow::Result<()> {
         if let Some(event) = Self::parse_event_from_grpc_instruction(
             protocols,
@@ -925,7 +947,7 @@ impl EventParser {
             compiled_instructions,
             all_inner_instructions,
         )? {
-            callback(&event);
+            callback(event);
         }
 
         Ok(())
@@ -935,7 +957,7 @@ impl EventParser {
     fn parse_event_from_grpc_instruction(
         protocols: &[Protocol],
         event_type_filter: Option<&EventTypeFilter>,
-        instruction: &yellowstone_grpc_proto::prelude::CompiledInstruction,
+        instruction: InstructionView<'_>,
         accounts: &[Pubkey],
         signature: Signature,
         slot: u64,
@@ -1125,7 +1147,7 @@ impl EventParser {
         bot_wallet: Option<Pubkey>,
         transaction_index: Option<u64>,
         inner_instructions: Option<&InnerInstructions>,
-        callback: Arc<dyn for<'a> Fn(&'a DexEvent) + Send + Sync>,
+        callback: &mut impl FnMut(DexEvent),
     ) -> anyhow::Result<()> {
         // 添加边界检查以防止越界访问
         let program_id_index = instruction.program_id_index as usize;
@@ -1171,7 +1193,7 @@ impl EventParser {
                 &instruction.data,
                 metadata.clone(),
             ) {
-                callback(&event);
+                callback(event);
             }
             return Ok(());
         }
@@ -1248,7 +1270,7 @@ impl EventParser {
         // 设置处理时间（使用高性能时钟）
         event.metadata_mut().handle_us = elapsed_micros_since(recv_us);
         event = Self::process_event(event, bot_wallet);
-        callback(&event);
+        callback(event);
 
         Ok(())
     }
@@ -1534,7 +1556,9 @@ impl EventParser {
     }
 
     fn instruction_needs_program_data(protocol: &Protocol, data: &[u8]) -> bool {
-        if data.len() < 8 { return false; }
+        if data.len() < 8 {
+            return false;
+        }
         match protocol {
             // Liquidity-only transactions also need their invocation-scoped execution logs.
             Protocol::RaydiumCpmm | Protocol::RaydiumClmm | Protocol::Whirlpool => true,
@@ -1749,20 +1773,24 @@ fn enrich_event_from_program_data(
                 }
             }
             Protocol::RaydiumCpmm => {
-                use crate::streaming::event_parser::protocols::raydium_cpmm::parser::parse_swap_event_from_program_data;
                 use crate::streaming::event_parser::protocols::raydium_cpmm::parser::parse_liquidity_state_from_program_data;
+                use crate::streaming::event_parser::protocols::raydium_cpmm::parser::parse_swap_event_from_program_data;
                 match event {
                     DexEvent::RaydiumCpmmDepositEvent(e) => {
-                        if let Some(state) = parse_liquidity_state_from_program_data(item, e.pool_state, 0) {
+                        if let Some(state) =
+                            parse_liquidity_state_from_program_data(item, e.pool_state, 0)
+                        {
                             e.liquidity_state = Some(state);
                         }
                     }
                     DexEvent::RaydiumCpmmWithdrawEvent(e) => {
-                        if let Some(state) = parse_liquidity_state_from_program_data(item, e.pool_state, 1) {
+                        if let Some(state) =
+                            parse_liquidity_state_from_program_data(item, e.pool_state, 1)
+                        {
                             e.liquidity_state = Some(state);
                         }
                     }
-                    _ => {},
+                    _ => {}
                 }
                 if let DexEvent::RaydiumCpmmSwapEvent(swap_event) = event {
                     if let Some(log_data) =

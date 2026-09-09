@@ -62,7 +62,6 @@
 ### 核心功能
 - **实时事件流**: 订阅多个 Solana DEX 协议的实时交易事件
 - **Yellowstone gRPC 支持**: 使用 Yellowstone gRPC 进行高性能事件订阅
-- **ShredStream 支持**: 使用 ShredStream 协议进行替代事件流传输
 - **统一事件接口**: 在所有支持的协议中保持一致的事件处理
 
 ### 多协议支持
@@ -86,7 +85,7 @@
 - **高性能**: 针对低延迟事件处理进行优化
 - **批处理优化**: 批量处理事件以减少回调开销
 - **性能监控**: 内置性能指标监控，包括事件处理速度
-- **内存优化**: 对象池和缓存机制减少内存分配
+- **内存优化**: 移动事件所有权、共享交易公钥表、借用 CPI 指令缓冲区，减少拷贝与内存分配
 - **灵活配置系统**: 支持自定义批处理大小、背压策略、通道大小等参数
 - **预设配置**: 提供高吞吐量、低延迟等预设配置，针对不同使用场景优化
 - **背压处理**: 支持阻塞、丢弃等背压策略
@@ -181,7 +180,6 @@ let grpc = YellowstoneGrpc::new_with_config(endpoint, token, config)?;
 | 描述 | 运行命令 | 源码路径 |
 |------|---------|----------|
 | 使用 Yellowstone gRPC 监控交易事件 | `cargo run --example grpc_example` | [examples/grpc_example.rs](examples/grpc_example.rs) |
-| 使用 ShredStream 监控交易事件 | `cargo run --example shred_example` | [examples/shred_example.rs](examples/shred_example.rs) |
 | 解析 Solana 主网交易数据 | `cargo run --example parse_tx_events` | [examples/parse_tx_events.rs](examples/parse_tx_events.rs) |
 | 监控 PancakeSwap V3 交换事件（Swap/SwapV2） | `cargo run --example pancakeswap_swap_with_logs` | [examples/pancakeswap_swap_with_logs.rs](examples/pancakeswap_swap_with_logs.rs) |
 | 运行时更新过滤器 | `cargo run --example dynamic_subscription` | [examples/dynamic_subscription.rs](examples/dynamic_subscription.rs) |
@@ -288,7 +286,6 @@ grpc.update_subscription(
 ## 🌐 事件流服务
 
 - **Yellowstone gRPC**: 高性能 Solana 事件流
-- **ShredStream**: 替代事件流协议
 
 ## 🏗️ 架构特性
 
@@ -307,7 +304,6 @@ grpc.update_subscription(
 ### 流基础设施
 
 - **Yellowstone gRPC 客户端**: 针对 Solana 事件流优化
-- **ShredStream 客户端**: 替代流实现
 - **高性能处理**: 优化的事件处理机制
 
 ## 📁 项目结构
@@ -315,7 +311,6 @@ grpc.update_subscription(
 ```
 src/
 ├── common/           # 通用功能和类型
-├── protos/           # Protocol buffer 定义
 ├── streaming/        # 事件流系统
 │   ├── event_parser/ # 事件解析系统
 │   │   ├── common/   # 通用事件解析工具
@@ -328,7 +323,6 @@ src/
 │   │   │   ├── raydium_cpmm/ # Raydium CPMM 事件解析
 │   │   │   └── raydium_clmm/ # Raydium CLMM 事件解析
 │   │   └── factory.rs # 解析器工厂
-│   ├── shred_stream.rs # ShredStream 客户端
 │   ├── yellowstone_grpc.rs # Yellowstone gRPC 客户端
 │   └── yellowstone_sub_system.rs # Yellowstone 子系统
 └── lib.rs            # 主库文件

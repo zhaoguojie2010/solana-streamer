@@ -1,9 +1,10 @@
+use crate::streaming::event_parser::common::high_performance_clock::get_high_perf_clock;
 use solana_sdk::{pubkey::Pubkey, signature::Signature};
 use std::{collections::HashMap, fmt};
 use yellowstone_grpc_proto::{
     geyser::{
-        SubscribeRequestFilterAccounts, SubscribeRequestFilterTransactions,
-        SubscribeUpdateTransactionInfo,
+        SubscribeRequestFilterAccounts, SubscribeRequestFilterTransactions, SubscribeUpdateAccount,
+        SubscribeUpdateBlockMeta, SubscribeUpdateTransaction, SubscribeUpdateTransactionInfo,
     },
     prost_types::Timestamp,
 };
@@ -108,63 +109,54 @@ impl Default for TransactionPretty {
     }
 }
 
-// impl From<SubscribeUpdateAccount> for AccountPretty {
-//     fn from(account: SubscribeUpdateAccount) -> Self {
-//         let account_info = account.account.unwrap();
-//         Self {
-//             slot: account.slot,
-//             signature: if let Some(txn_signature) = account_info.txn_signature {
-//                 Signature::try_from(txn_signature.as_slice()).expect("valid signature")
-//             } else {
-//                 Signature::default()
-//             },
-//             pubkey: Pubkey::try_from(account_info.pubkey.as_slice()).expect("valid pubkey"),
-//             executable: account_info.executable,
-//             lamports: account_info.lamports,
-//             owner: Pubkey::try_from(account_info.owner.as_slice()).expect("valid pubkey"),
-//             rent_epoch: account_info.rent_epoch,
-//             data: account_info.data,
-//             recv_us: get_high_perf_clock(),
-//         }
-//     }
-// }
+/// Move protobuf payloads into the event wrapper without allocating a pooled shell.
+impl From<SubscribeUpdateAccount> for AccountPretty {
+    fn from(update: SubscribeUpdateAccount) -> Self {
+        let info = update.account.expect("account update must contain account info");
+        Self {
+            slot: update.slot,
+            write_version: info.write_version,
+            is_startup: update.is_startup,
+            signature: info
+                .txn_signature
+                .map(|signature| {
+                    Signature::try_from(signature.as_slice()).expect("valid signature")
+                })
+                .unwrap_or_default(),
+            pubkey: Pubkey::try_from(info.pubkey.as_slice()).expect("valid pubkey"),
+            executable: info.executable,
+            lamports: info.lamports,
+            owner: Pubkey::try_from(info.owner.as_slice()).expect("valid pubkey"),
+            rent_epoch: info.rent_epoch,
+            data: info.data,
+            recv_us: get_high_perf_clock(),
+        }
+    }
+}
 
-// impl From<(SubscribeUpdateBlockMeta, Option<Timestamp>)> for BlockMetaPretty {
-//     fn from(
-//         (SubscribeUpdateBlockMeta { slot, blockhash, .. }, block_time): (
-//             SubscribeUpdateBlockMeta,
-//             Option<Timestamp>,
-//         ),
-//     ) -> Self {
-//         Self {
-//             block_hash: blockhash,
-//             block_time,
-//             slot,
-//             recv_us: get_high_perf_clock(),
-//         }
-//     }
-// }
+impl From<(SubscribeUpdateBlockMeta, Option<Timestamp>)> for BlockMetaPretty {
+    fn from((update, block_time): (SubscribeUpdateBlockMeta, Option<Timestamp>)) -> Self {
+        Self {
+            slot: update.slot,
+            block_hash: update.blockhash,
+            block_time,
+            recv_us: get_high_perf_clock(),
+        }
+    }
+}
 
-// impl From<(SubscribeUpdateTransaction, Option<Timestamp>)> for TransactionPretty {
-//     fn from(
-//         (SubscribeUpdateTransaction { transaction, slot }, block_time): (
-//             SubscribeUpdateTransaction,
-//             Option<Timestamp>,
-//         ),
-//     ) -> Self {
-//         let tx = transaction.expect("should be defined");
-//         // 根据用户说明，交易索引在 transaction.index 中
-//         let transaction_index = tx.index;
-//         Self {
-//             slot,
-//             transaction_index: Some(transaction_index), // 提取交易索引
-//             block_time,
-//             block_hash: String::new(),
-//             signature: Signature::try_from(tx.signature.as_slice()).expect("valid signature"),
-//             is_vote: tx.is_vote,
-//             tx: yellowstone_grpc_proto::convert_from::create_tx_with_meta(tx)
-//                 .expect("valid tx with meta"),
-//             recv_us: get_high_perf_clock(),
-//         }
-//     }
-// }
+impl From<(SubscribeUpdateTransaction, Option<Timestamp>)> for TransactionPretty {
+    fn from((update, block_time): (SubscribeUpdateTransaction, Option<Timestamp>)) -> Self {
+        let info = update.transaction.expect("transaction update must contain transaction info");
+        Self {
+            slot: update.slot,
+            transaction_index: Some(info.index),
+            block_hash: String::new(),
+            block_time,
+            signature: Signature::try_from(info.signature.as_slice()).expect("valid signature"),
+            is_vote: info.is_vote,
+            recv_us: get_high_perf_clock(),
+            grpc_tx: info,
+        }
+    }
+}

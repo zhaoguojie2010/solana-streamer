@@ -106,7 +106,7 @@ pub struct TxDexEvents {
     /// Present only when explicitly enabled by the stream client.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tx_exec_meta: Option<TxExecutionMetaAudit>,
-    /// Source execution status. Processed gRPC sets this from transaction meta; raw/shred
+    /// Source execution status. Processed gRPC sets this from transaction meta; raw transaction
     /// sources leave it unknown and therefore cannot advance persistent pending state.
     #[serde(default)]
     pub execution_status: TxExecutionStatus,

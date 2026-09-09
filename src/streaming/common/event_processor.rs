@@ -7,7 +7,6 @@ use crate::streaming::event_parser::core::common_event_parser::CommonEventParser
 use crate::streaming::event_parser::core::event_parser::EventParser;
 use crate::streaming::event_parser::{core::traits::DexEvent, Protocol, TxDexEvents};
 use crate::streaming::grpc::{EventPretty, MetricsManager};
-use crate::streaming::shred::TransactionWithSlot;
 use solana_sdk::pubkey::Pubkey;
 use std::sync::Arc;
 
@@ -176,98 +175,6 @@ pub async fn process_grpc_tx_events(
         transaction_index,
         swap_cu_parse_config,
         tx_exec_meta_audit,
-    )
-    .await?
-    {
-        create_tx_metrics_callback(callback)(tx_events);
-    }
-
-    Ok(())
-}
-
-/// Process Shred transaction events
-pub async fn process_shred_transaction(
-    transaction_with_slot: TransactionWithSlot,
-    protocols: &[Protocol],
-    event_type_filter: Option<&EventTypeFilter>,
-    swap_cu_parse_config: Option<&SwapCuParseConfig>,
-    callback: Arc<dyn Fn(DexEvent) + Send + Sync>,
-    bot_wallet: Option<Pubkey>,
-) -> AnyResult<()> {
-    MetricsManager::global().add_tx_process_count();
-
-    let tx = transaction_with_slot.transaction;
-    let slot = transaction_with_slot.slot;
-
-    if tx.signatures.is_empty() {
-        return Ok(());
-    }
-
-    let signature = tx.signatures[0];
-    let recv_us = transaction_with_slot.recv_us;
-
-    let adapter_callback = create_metrics_callback(callback);
-    let accounts = tx.message.static_account_keys();
-
-    EventParser::parse_instruction_events_from_versioned_transaction(
-        protocols,
-        event_type_filter,
-        &tx,
-        signature,
-        Some(slot),
-        None,
-        recv_us,
-        accounts,
-        &[],
-        bot_wallet,
-        None,
-        swap_cu_parse_config,
-        adapter_callback,
-    )
-    .await?;
-
-    Ok(())
-}
-
-/// Process one Shred transaction as a transaction-level DEX event batch.
-pub async fn process_shred_tx_events(
-    transaction_with_slot: TransactionWithSlot,
-    protocols: &[Protocol],
-    event_type_filter: Option<&EventTypeFilter>,
-    swap_cu_parse_config: Option<&SwapCuParseConfig>,
-    callback: Arc<dyn Fn(TxDexEvents) + Send + Sync>,
-    bot_wallet: Option<Pubkey>,
-    entry_index: Option<u64>,
-    tx_index_in_entry: Option<u64>,
-) -> AnyResult<()> {
-    MetricsManager::global().add_tx_process_count();
-
-    let tx = transaction_with_slot.transaction;
-    let slot = transaction_with_slot.slot;
-
-    if tx.signatures.is_empty() {
-        return Ok(());
-    }
-
-    let signature = tx.signatures[0];
-    let recv_us = transaction_with_slot.recv_us;
-    let accounts = tx.message.static_account_keys();
-
-    if let Some(tx_events) = EventParser::parse_versioned_transaction_to_events(
-        protocols,
-        event_type_filter,
-        &tx,
-        signature,
-        Some(slot),
-        None,
-        recv_us,
-        accounts,
-        &[],
-        bot_wallet,
-        None,
-        entry_index,
-        tx_index_in_entry,
-        swap_cu_parse_config,
     )
     .await?
     {
