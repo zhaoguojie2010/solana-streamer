@@ -1534,39 +1534,11 @@ impl EventParser {
     }
 
     fn instruction_needs_program_data(protocol: &Protocol, data: &[u8]) -> bool {
+        if data.len() < 8 { return false; }
         match protocol {
-            Protocol::PancakeSwap => {
-                if data.len() < 8 {
-                    return false;
-                }
-                crate::streaming::event_parser::protocols::pancakeswap::parser::is_pancakeswap_swap_instruction(
-                    &data[..8],
-                )
-            }
-            Protocol::RaydiumCpmm => {
-                if data.len() < 8 {
-                    return false;
-                }
-                crate::streaming::event_parser::protocols::raydium_cpmm::parser::is_raydium_cpmm_swap_instruction(
-                    &data[..8],
-                )
-            }
-            Protocol::RaydiumClmm => {
-                if data.len() < 8 {
-                    return false;
-                }
-                crate::streaming::event_parser::protocols::raydium_clmm::parser::is_raydium_clmm_swap_instruction(
-                    &data[..8],
-                )
-            }
-            Protocol::Whirlpool => {
-                if data.len() < 8 {
-                    return false;
-                }
-                crate::streaming::event_parser::protocols::whirlpool::parser::is_whirlpool_swap_instruction(
-                    &data[..8],
-                )
-            }
+            // Liquidity-only transactions also need their invocation-scoped execution logs.
+            Protocol::RaydiumCpmm | Protocol::RaydiumClmm | Protocol::Whirlpool => true,
+            Protocol::PancakeSwap => crate::streaming::event_parser::protocols::pancakeswap::parser::is_pancakeswap_swap_instruction(&data[..8]),
             _ => false,
         }
     }
@@ -1778,6 +1750,20 @@ fn enrich_event_from_program_data(
             }
             Protocol::RaydiumCpmm => {
                 use crate::streaming::event_parser::protocols::raydium_cpmm::parser::parse_swap_event_from_program_data;
+                use crate::streaming::event_parser::protocols::raydium_cpmm::parser::parse_liquidity_state_from_program_data;
+                match event {
+                    DexEvent::RaydiumCpmmDepositEvent(e) => {
+                        if let Some(state) = parse_liquidity_state_from_program_data(item, e.pool_state, 0) {
+                            e.liquidity_state = Some(state);
+                        }
+                    }
+                    DexEvent::RaydiumCpmmWithdrawEvent(e) => {
+                        if let Some(state) = parse_liquidity_state_from_program_data(item, e.pool_state, 1) {
+                            e.liquidity_state = Some(state);
+                        }
+                    }
+                    _ => {},
+                }
                 if let DexEvent::RaydiumCpmmSwapEvent(swap_event) = event {
                     if let Some(log_data) =
                         parse_swap_event_from_program_data(item, &swap_event.pool_state)

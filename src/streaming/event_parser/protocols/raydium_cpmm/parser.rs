@@ -103,6 +103,7 @@ fn parse_withdraw_instruction(
         return None;
     }
     Some(DexEvent::RaydiumCpmmWithdrawEvent(RaydiumCpmmWithdrawEvent {
+        liquidity_state: None,
         metadata,
         lp_token_amount: read_u64_le(data, 0)?,
         minimum_token0_amount: read_u64_le(data, 8)?,
@@ -227,6 +228,7 @@ fn parse_deposit_instruction(
         return None;
     }
     Some(DexEvent::RaydiumCpmmDepositEvent(RaydiumCpmmDepositEvent {
+        liquidity_state: None,
         metadata,
         lp_token_amount: read_u64_le(data, 0)?,
         maximum_token0_amount: read_u64_le(data, 8)?,
@@ -416,4 +418,26 @@ pub fn parse_swap_event_from_program_data(
         return None;
     }
     Some(event_data)
+}
+
+/// Decode only the complete, program-authenticated LpChangeEvent layout.
+pub fn parse_liquidity_state_from_program_data(
+    item: &ProgramDataItem, pool: Pubkey, change_type: u8,
+) -> Option<super::events::RaydiumCpmmLiquidityState> {
+    use base64::Engine;
+    if item.program_id != RAYDIUM_CPMM_PROGRAM_ID { return None; }
+    let bytes = base64::engine::general_purpose::STANDARD.decode(&item.base64).ok()?;
+    if bytes.len() != 97 || bytes.get(..8)? != [121, 163, 205, 201, 57, 218, 117, 60]
+        || Pubkey::new_from_array(bytes.get(8..40)?.try_into().ok()?) != pool
+        || *bytes.get(96)? != change_type { return None; }
+    Some(super::events::RaydiumCpmmLiquidityState {
+        lp_amount_before: read_u64_le(&bytes, 40)?,
+        token_0_vault_before: read_u64_le(&bytes, 48)?,
+        token_1_vault_before: read_u64_le(&bytes, 56)?,
+        token_0_amount: read_u64_le(&bytes, 64)?,
+        token_1_amount: read_u64_le(&bytes, 72)?,
+        token_0_transfer_fee: read_u64_le(&bytes, 80)?,
+        token_1_transfer_fee: read_u64_le(&bytes, 88)?,
+        change_type,
+    })
 }

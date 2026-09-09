@@ -48,6 +48,9 @@ pub struct RaydiumCpmmSwapEvent {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, BorshDeserialize)]
 pub struct RaydiumCpmmDepositEvent {
     #[borsh(skip)]
+    #[serde(default)]
+    pub liquidity_state: Option<RaydiumCpmmLiquidityState>,
+    #[borsh(skip)]
     pub metadata: EventMetadata,
     pub lp_token_amount: u64,
     pub maximum_token0_amount: u64,
@@ -106,6 +109,9 @@ pub struct RaydiumCpmmInitializeEvent {
 /// 提款
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, BorshDeserialize)]
 pub struct RaydiumCpmmWithdrawEvent {
+    #[borsh(skip)]
+    #[serde(default)]
+    pub liquidity_state: Option<RaydiumCpmmLiquidityState>,
     #[borsh(skip)]
     pub metadata: EventMetadata,
     pub lp_token_amount: u64,
@@ -180,4 +186,18 @@ pub mod discriminators {
     // sha256("event:SwapEvent")[0..8]
     pub const SWAP_EVENT: &[u8] = &[0x40, 0xc6, 0xcd, 0xe8, 0x26, 0x08, 0x71, 0xe2];
     pub const LP_CHANGE_EVENT: &[u8] = &[0x9a, 0x0b, 0x0a, 0x7c, 0x7e, 0x5f, 0x7f, 0x3c];
+}
+
+/// LpChangeEvent uses fee-excluded reserves before execution. Withdrawal amounts are net
+/// recipient amounts; add transfer_fee to obtain the vault debit. Deposit amounts are vault credits.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, BorshDeserialize)]
+pub struct RaydiumCpmmLiquidityState {
+    pub lp_amount_before: u64,
+    pub token_0_vault_before: u64,
+    pub token_1_vault_before: u64,
+    pub token_0_amount: u64,
+    pub token_1_amount: u64,
+    pub token_0_transfer_fee: u64,
+    pub token_1_transfer_fee: u64,
+    pub change_type: u8,
 }
