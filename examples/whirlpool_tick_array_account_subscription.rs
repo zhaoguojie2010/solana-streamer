@@ -1,3 +1,5 @@
+mod common;
+
 use solana_streamer_sdk::streaming::{
     event_parser::{protocols::whirlpool::parser::WHIRLPOOL_PROGRAM_ID, DexEvent, Protocol},
     grpc::ClientConfig,
@@ -7,6 +9,7 @@ use solana_streamer_sdk::streaming::{
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    env_logger::init();
     println!("开始 Whirlpool TickArray 账户数据订阅示例...");
     subscribe_whirlpool_tick_array_accounts().await?;
     Ok(())
@@ -17,11 +20,8 @@ async fn subscribe_whirlpool_tick_array_accounts() -> Result<(), Box<dyn std::er
 
     let mut config: ClientConfig = ClientConfig::default();
     config.enable_metrics = true;
-    let grpc = YellowstoneGrpc::new_with_config(
-        "https://solana-yellowstone-grpc.publicnode.com:443".to_string(),
-        None,
-        config,
-    )?;
+    let grpc =
+        YellowstoneGrpc::new_with_config(common::grpc_endpoint()?, common::grpc_token()?, config)?;
 
     println!("gRPC 客户端创建成功");
 
@@ -63,14 +63,10 @@ async fn subscribe_whirlpool_tick_array_accounts() -> Result<(), Box<dyn std::er
     )
     .await?;
 
-    let grpc_clone = grpc.clone();
-    tokio::spawn(async move {
-        tokio::time::sleep(std::time::Duration::from_secs(1000)).await;
-        grpc_clone.stop().await;
-    });
-
     println!("等待 Ctrl+C 停止...");
-    tokio::signal::ctrl_c().await?;
+    let shutdown = common::wait_for_shutdown(&grpc.subscription_handle).await;
+    grpc.stop().await;
+    shutdown?;
 
     Ok(())
 }

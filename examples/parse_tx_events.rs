@@ -1,4 +1,6 @@
-use anyhow::Result;
+mod common;
+
+use anyhow::{bail, Context, Result};
 use solana_commitment_config::CommitmentConfig;
 use solana_streamer_sdk::streaming::event_parser::core::event_parser::EventParser;
 use solana_streamer_sdk::streaming::event_parser::DexEvent;
@@ -8,22 +10,19 @@ use std::sync::Arc;
 /// Get transaction data based on transaction signature
 #[tokio::main]
 async fn main() -> Result<()> {
-    let signatures = vec![
-        "4PsHYajH87x2zJPEGZczZtd2ksibuMCFPonC24jk5mTGZ46hzvjpzM5UZuLz9sRv79MkCBbtDqwJapGPTSkCFKoL",
-    ];
+    env_logger::init();
+    let mut signatures: Vec<String> = std::env::args().skip(1).collect();
+    if signatures.is_empty() {
+        signatures.push(
+            "4PsHYajH87x2zJPEGZczZtd2ksibuMCFPonC24jk5mTGZ46hzvjpzM5UZuLz9sRv79MkCBbtDqwJapGPTSkCFKoL".to_string(),
+        );
+    }
     // Validate signature format
-    let mut valid_signatures = Vec::new();
     for sig_str in &signatures {
-        match solana_sdk::signature::Signature::from_str(sig_str) {
-            Ok(_) => valid_signatures.push(*sig_str),
-            Err(e) => println!("Invalid signature format: {}", e),
-        }
+        solana_sdk::signature::Signature::from_str(sig_str)
+            .with_context(|| format!("Invalid transaction signature: {sig_str}"))?;
     }
-    if valid_signatures.is_empty() {
-        println!("No valid transaction signatures");
-        return Ok(());
-    }
-    for signature in valid_signatures {
+    for signature in &signatures {
         println!("Starting transaction parsing: {}", signature);
         get_single_transaction_details(signature).await?;
         println!("Transaction parsing completed: {}\n", signature);
@@ -47,10 +46,13 @@ async fn get_single_transaction_details(signature_str: &str) -> Result<()> {
     let signature = Signature::from_str(signature_str)?;
 
     // Create Solana RPC client
-    let rpc_url = "https://api.mainnet-beta.solana.com";
+    let rpc_url = common::env_or_default("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")?;
     println!("Connecting to Solana RPC: {}", rpc_url);
 
-    let client = solana_client::nonblocking::rpc_client::RpcClient::new(rpc_url.to_string());
+    let client = solana_client::nonblocking::rpc_client::RpcClient::new_with_timeout(
+        rpc_url,
+        std::time::Duration::from_secs(30),
+    );
 
     match client
         .get_transaction_with_config(
@@ -98,8 +100,7 @@ async fn get_single_transaction_details(signature_str: &str) -> Result<()> {
             let versioned_tx = match transaction.transaction.transaction.decode() {
                 Some(tx) => tx,
                 None => {
-                    println!("Failed to decode transaction");
-                    return Ok(());
+                    bail!("Failed to decode transaction {signature_str}");
                 }
             };
 
@@ -194,6 +195,9 @@ async fn get_single_transaction_details(signature_str: &str) -> Result<()> {
                 Protocol::RaydiumCpmm,
                 Protocol::RaydiumAmmV4,
                 Protocol::MeteoraDammV2,
+                Protocol::MeteoraDlmm,
+                Protocol::Whirlpool,
+                Protocol::PancakeSwap,
             ];
 
             // Create callback
@@ -214,17 +218,15 @@ async fn get_single_transaction_details(signature_str: &str) -> Result<()> {
                 &inner_instructions_vec,
                 bot_wallet,
                 transaction_index,
+                None,
                 callback,
             )
             .await?;
         }
         Err(e) => {
-            println!("Failed to get transaction: {}", e);
+            return Err(e).with_context(|| format!("Failed to get transaction {signature_str}"));
         }
     }
-
-    println!("Press Ctrl+C to exit example...");
-    tokio::signal::ctrl_c().await?;
 
     Ok(())
 }

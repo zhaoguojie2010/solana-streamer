@@ -1,3 +1,5 @@
+mod common;
+
 use solana_streamer_sdk::streaming::{
     event_parser::{
         common::{filter::EventTypeFilter, EventType},
@@ -16,6 +18,7 @@ use yellowstone_grpc_proto::geyser::{
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    env_logger::init();
     println!("开始 Meteora DLMM BinArray 账户数据订阅示例...");
     subscribe_meteora_dlmm_bin_array_accounts().await?;
     Ok(())
@@ -28,11 +31,8 @@ async fn subscribe_meteora_dlmm_bin_array_accounts() -> Result<(), Box<dyn std::
     let mut config: ClientConfig = ClientConfig::default();
     // 启用性能监控（可选，有性能开销）
     config.enable_metrics = true;
-    let grpc = YellowstoneGrpc::new_with_config(
-        "https://solana-yellowstone-grpc.publicnode.com:443".to_string(),
-        None,
-        config,
-    )?;
+    let grpc =
+        YellowstoneGrpc::new_with_config(common::grpc_endpoint()?, common::grpc_token()?, config)?;
 
     println!("gRPC 客户端创建成功");
 
@@ -86,15 +86,10 @@ async fn subscribe_meteora_dlmm_bin_array_accounts() -> Result<(), Box<dyn std::
     )
     .await?;
 
-    // 支持 stop 方法，测试代码 - 异步1000秒之后停止
-    let grpc_clone = grpc.clone();
-    tokio::spawn(async move {
-        tokio::time::sleep(std::time::Duration::from_secs(1000)).await;
-        grpc_clone.stop().await;
-    });
-
     println!("等待 Ctrl+C 停止...");
-    tokio::signal::ctrl_c().await?;
+    let shutdown = common::wait_for_shutdown(&grpc.subscription_handle).await;
+    grpc.stop().await;
+    shutdown?;
 
     Ok(())
 }
@@ -103,7 +98,6 @@ fn create_event_callback() -> impl Fn(DexEvent) {
     |event: DexEvent| {
         match event {
             DexEvent::MeteoraDlmmBinArrayAccountEvent(e) => {
-                /*
                 println!("=== Meteora DLMM BinArray 账户更新 ===");
                 println!("账户地址: {}", e.pubkey);
                 println!("BinArray Index: {}", e.bin_array.index);
@@ -111,7 +105,10 @@ fn create_event_callback() -> impl Fn(DexEvent) {
                 println!("关联 LbPair: {}", e.bin_array.lb_pair);
 
                 // 统计非空的 bin 数量
-                let non_empty_bins: usize = e.bin_array.bins.iter()
+                let non_empty_bins: usize = e
+                    .bin_array
+                    .bins
+                    .iter()
                     .filter(|bin| bin.amount_x > 0 || bin.amount_y > 0 || bin.liquidity_supply > 0)
                     .count();
 
@@ -120,13 +117,12 @@ fn create_event_callback() -> impl Fn(DexEvent) {
                 // 显示前几个非空 bin 的信息
                 let mut shown = 0;
                 for (idx, bin) in e.bin_array.bins.iter().enumerate() {
-                    if (bin.amount_x > 0 || bin.amount_y > 0 || bin.liquidity_supply > 0) && shown < 5 {
-                        println!("  Bin[{}]: X={}, Y={}, Price={}, Liquidity={}",
-                            idx,
-                            bin.amount_x,
-                            bin.amount_y,
-                            bin.price,
-                            bin.liquidity_supply
+                    if (bin.amount_x > 0 || bin.amount_y > 0 || bin.liquidity_supply > 0)
+                        && shown < 5
+                    {
+                        println!(
+                            "  Bin[{}]: X={}, Y={}, Price={}, Liquidity={}",
+                            idx, bin.amount_x, bin.amount_y, bin.price, bin.liquidity_supply
                         );
                         shown += 1;
                     }
@@ -134,7 +130,6 @@ fn create_event_callback() -> impl Fn(DexEvent) {
 
                 println!("Slot: {}", e.metadata.slot);
                 println!("=====================================");
-                */
             }
             _ => {
                 // 忽略其他事件

@@ -1,10 +1,12 @@
+mod common;
+
 use solana_streamer_sdk::streaming::{
     event_parser::{
         protocols::meteora_dlmm::{events::discriminators, parser::METEORA_DLMM_PROGRAM_ID},
         DexEvent, Protocol,
     },
     grpc::ClientConfig,
-    yellowstone_grpc::{AccountFilter, TransactionFilter},
+    yellowstone_grpc::AccountFilter,
     YellowstoneGrpc,
 };
 use yellowstone_grpc_proto::geyser::{
@@ -15,6 +17,7 @@ use yellowstone_grpc_proto::geyser::{
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    env_logger::init();
     println!("开始 Meteora DLMM 账户数据订阅示例...");
     subscribe_meteora_dlmm_accounts().await?;
     Ok(())
@@ -27,11 +30,8 @@ async fn subscribe_meteora_dlmm_accounts() -> Result<(), Box<dyn std::error::Err
     let mut config: ClientConfig = ClientConfig::default();
     // 启用性能监控（可选，有性能开销）
     config.enable_metrics = true;
-    let grpc = YellowstoneGrpc::new_with_config(
-        "https://solana-yellowstone-grpc.publicnode.com:443".to_string(),
-        Some("3ec495919af1e20d458053d07565e8c785d10b17c0a33d7ed9e4e0a9df05b8ff".to_string()),
-        config,
-    )?;
+    let grpc =
+        YellowstoneGrpc::new_with_config(common::grpc_endpoint()?, common::grpc_token()?, config)?;
 
     println!("gRPC 客户端创建成功");
 
@@ -74,13 +74,6 @@ async fn subscribe_meteora_dlmm_accounts() -> Result<(), Box<dyn std::error::Err
         cuckoo_accounts_filter: None,
     };
 
-    // 交易过滤器（可选，如果只想订阅账户数据，可以留空）
-    let transaction_filter = TransactionFilter {
-        account_include: vec![METEORA_DLMM_PROGRAM_ID.to_string()],
-        account_exclude: vec![],
-        account_required: vec![],
-    };
-
     // 事件类型过滤器 - 只订阅账户事件
     use solana_streamer_sdk::streaming::event_parser::common::filter::EventTypeFilter;
     use solana_streamer_sdk::streaming::event_parser::common::EventType;
@@ -107,15 +100,10 @@ async fn subscribe_meteora_dlmm_accounts() -> Result<(), Box<dyn std::error::Err
     )
     .await?;
 
-    // 支持 stop 方法，测试代码 - 异步1000秒之后停止
-    let grpc_clone = grpc.clone();
-    tokio::spawn(async move {
-        tokio::time::sleep(std::time::Duration::from_secs(1000)).await;
-        grpc_clone.stop().await;
-    });
-
     println!("等待 Ctrl+C 停止...");
-    tokio::signal::ctrl_c().await?;
+    let shutdown = common::wait_for_shutdown(&grpc.subscription_handle).await;
+    grpc.stop().await;
+    shutdown?;
 
     Ok(())
 }
@@ -129,7 +117,6 @@ fn create_event_callback() -> impl Fn(DexEvent) {
         // );
         match event {
             DexEvent::MeteoraDlmmLbPairAccountEvent(e) => {
-                /*
                 println!("=== Meteora DLMM LbPair 账户更新 ===");
                 println!("账户地址: {}", e.pubkey);
                 println!("Token X Mint: {}", e.lb_pair.token_x_mint);
@@ -143,7 +130,6 @@ fn create_event_callback() -> impl Fn(DexEvent) {
                 println!("Protocol Fee Y: {}", e.lb_pair.protocol_fee.amount_y);
                 println!("Last Updated At: {}", e.lb_pair.last_updated_at);
                 println!("=====================================");
-                */
             }
             DexEvent::MeteoraDlmmBinArrayBitmapExtensionAccountEvent(e) => {
                 println!("=== Meteora DLMM BinArrayBitmapExtension 账户更新 ===");

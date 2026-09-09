@@ -1,3 +1,5 @@
+mod common;
+
 use solana_streamer_sdk::streaming::event_parser::protocols::meteora_dlmm::parser::METEORA_DLMM_PROGRAM_ID;
 use solana_streamer_sdk::streaming::event_parser::{DexEvent, Protocol};
 use solana_streamer_sdk::streaming::{
@@ -6,6 +8,7 @@ use solana_streamer_sdk::streaming::{
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    env_logger::init();
     println!("开始 Meteora DLMM Swap/Swap2 事件订阅示例（含 CPI 日志解析）...");
     subscribe_meteora_dlmm_swaps().await?;
     Ok(())
@@ -17,11 +20,8 @@ async fn subscribe_meteora_dlmm_swaps() -> Result<(), Box<dyn std::error::Error>
     // 创建客户端配置
     let mut config: ClientConfig = ClientConfig::default();
     config.enable_metrics = true;
-    let grpc = YellowstoneGrpc::new_with_config(
-        "https://solana-yellowstone-grpc.publicnode.com:443".to_string(),
-        Some("3ec495919af1e20d458053d07565e8c785d10b17c0a33d7ed9e4e0a9df05b8ff".to_string()),
-        config,
-    )?;
+    let grpc =
+        YellowstoneGrpc::new_with_config(common::grpc_endpoint()?, common::grpc_token()?, config)?;
 
     println!("gRPC 客户端创建成功");
 
@@ -61,7 +61,9 @@ async fn subscribe_meteora_dlmm_swaps() -> Result<(), Box<dyn std::error::Error>
     .await?;
 
     println!("等待 Ctrl+C 停止...");
-    tokio::signal::ctrl_c().await?;
+    let shutdown = common::wait_for_shutdown(&grpc.subscription_handle).await;
+    grpc.stop().await;
+    shutdown?;
 
     Ok(())
 }

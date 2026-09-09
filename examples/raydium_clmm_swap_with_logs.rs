@@ -1,3 +1,5 @@
+mod common;
+
 use solana_streamer_sdk::streaming::event_parser::protocols::raydium_clmm::parser::RAYDIUM_CLMM_PROGRAM_ID;
 use solana_streamer_sdk::streaming::event_parser::{DexEvent, Protocol};
 use solana_streamer_sdk::streaming::{
@@ -6,6 +8,7 @@ use solana_streamer_sdk::streaming::{
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    env_logger::init();
     println!("开始 Raydium CLMM Swap/SwapV2 事件订阅示例（带日志解析）...");
     subscribe_raydium_clmm_swaps().await?;
     Ok(())
@@ -16,11 +19,8 @@ async fn subscribe_raydium_clmm_swaps() -> Result<(), Box<dyn std::error::Error>
 
     let mut config: ClientConfig = ClientConfig::default();
     config.enable_metrics = true;
-    let grpc = YellowstoneGrpc::new_with_config(
-        "https://solana-yellowstone-grpc.publicnode.com:443".to_string(),
-        Some("3ec495919af1e20d458053d07565e8c785d10b17c0a33d7ed9e4e0a9df05b8ff".to_string()),
-        config,
-    )?;
+    let grpc =
+        YellowstoneGrpc::new_with_config(common::grpc_endpoint()?, common::grpc_token()?, config)?;
 
     println!("gRPC 客户端创建成功");
 
@@ -54,7 +54,9 @@ async fn subscribe_raydium_clmm_swaps() -> Result<(), Box<dyn std::error::Error>
     .await?;
 
     println!("等待 Ctrl+C 停止...");
-    tokio::signal::ctrl_c().await?;
+    let shutdown = common::wait_for_shutdown(&grpc.subscription_handle).await;
+    grpc.stop().await;
+    shutdown?;
 
     Ok(())
 }

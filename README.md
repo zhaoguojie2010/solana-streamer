@@ -175,6 +175,8 @@ let grpc = YellowstoneGrpc::new_with_config(endpoint, token, config)?;
 
 ## 📚 Usage Examples
 
+See [Running examples](examples/README.md) for building all examples and configuring endpoints, tokens, and account addresses.
+
 ### Usage Examples Summary Table
 
 | Description | Run Command | Source Path |

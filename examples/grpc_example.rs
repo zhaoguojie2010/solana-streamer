@@ -1,3 +1,5 @@
+mod common;
+
 use solana_streamer_sdk::streaming::{
     event_parser::{
         protocols::{
@@ -16,6 +18,7 @@ use solana_streamer_sdk::streaming::{
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    env_logger::init();
     println!("Starting Yellowstone gRPC Streamer...");
     test_grpc().await?;
     Ok(())
@@ -28,11 +31,8 @@ async fn test_grpc() -> Result<(), Box<dyn std::error::Error>> {
     let mut config: ClientConfig = ClientConfig::default();
     // Enable performance monitoring, has performance overhead, disabled by default
     config.enable_metrics = true;
-    let grpc = YellowstoneGrpc::new_with_config(
-        "https://solana-yellowstone-grpc.publicnode.com:443".to_string(),
-        None,
-        config,
-    )?;
+    let grpc =
+        YellowstoneGrpc::new_with_config(common::grpc_endpoint()?, common::grpc_token()?, config)?;
 
     println!("GRPC client created successfully");
 
@@ -101,15 +101,10 @@ async fn test_grpc() -> Result<(), Box<dyn std::error::Error>> {
     )
     .await?;
 
-    // 支持 stop 方法，测试代码 -  异步1000秒之后停止
-    let grpc_clone = grpc.clone();
-    tokio::spawn(async move {
-        tokio::time::sleep(std::time::Duration::from_secs(1000)).await;
-        grpc_clone.stop().await;
-    });
-
     println!("Waiting for Ctrl+C to stop...");
-    tokio::signal::ctrl_c().await?;
+    let shutdown = common::wait_for_shutdown(&grpc.subscription_handle).await;
+    grpc.stop().await;
+    shutdown?;
 
     Ok(())
 }

@@ -174,6 +174,8 @@ let grpc = YellowstoneGrpc::new_with_config(endpoint, token, config)?;
 
 ## 📚 使用示例
 
+编译全部示例、配置服务地址 / token 和账户地址的方法见 [示例运行说明](examples/README.md)。
+
 ### 使用示例概览表
 
 | 描述 | 运行命令 | 源码路径 |

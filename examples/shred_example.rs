@@ -1,3 +1,5 @@
+mod common;
+
 use solana_streamer_sdk::streaming::{
     event_parser::{DexEvent, Protocol},
     shred::StreamClientConfig,
@@ -6,6 +8,7 @@ use solana_streamer_sdk::streaming::{
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    env_logger::init();
     println!("Starting ShredStream Streamer...");
     test_shreds().await?;
     Ok(())
@@ -18,8 +21,11 @@ async fn test_shreds() -> Result<(), Box<dyn std::error::Error>> {
     let mut config = StreamClientConfig::default();
     // Enable performance monitoring, has performance overhead, disabled by default
     config.enable_metrics = true;
-    let shred_stream =
-        ShredStreamGrpc::new_with_config("http://127.0.0.1:10800".to_string(), config).await?;
+    let shred_stream = ShredStreamGrpc::new_with_config(
+        common::env_or_default("SHRED_ENDPOINT", "http://127.0.0.1:10800")?,
+        config,
+    )
+    .await?;
 
     let callback = create_event_callback();
     let protocols = vec![
@@ -41,15 +47,10 @@ async fn test_shreds() -> Result<(), Box<dyn std::error::Error>> {
     println!("Listening for events, press Ctrl+C to stop...");
     shred_stream.shredstream_subscribe(protocols, None, event_type_filter, callback).await?;
 
-    // 支持 stop 方法，测试代码 - 异步1000秒之后停止
-    let shred_clone = shred_stream.clone();
-    tokio::spawn(async move {
-        tokio::time::sleep(std::time::Duration::from_secs(1000)).await;
-        shred_clone.stop().await;
-    });
-
     println!("Waiting for Ctrl+C to stop...");
-    tokio::signal::ctrl_c().await?;
+    let shutdown = common::wait_for_shutdown(&shred_stream.subscription_handle).await;
+    shred_stream.stop().await;
+    shutdown?;
 
     Ok(())
 }

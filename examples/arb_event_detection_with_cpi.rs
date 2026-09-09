@@ -1,3 +1,5 @@
+mod common;
+
 use solana_streamer_sdk::streaming::event_parser::{
     common::EventType,
     protocols::bonk::types::TradeDirection,
@@ -41,6 +43,7 @@ struct ArbTraceState {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    env_logger::init();
     println!("Starting arb-event detection example...");
     subscribe_arb_events().await
 }
@@ -49,11 +52,8 @@ async fn subscribe_arb_events() -> Result<(), Box<dyn std::error::Error>> {
     let mut config = ClientConfig::default();
     config.enable_metrics = true;
 
-    let grpc = YellowstoneGrpc::new_with_config(
-        "https://solana-yellowstone-grpc.publicnode.com:443".to_string(),
-        Some("3ec495919af1e20d458053d07565e8c785d10b17c0a33d7ed9e4e0a9df05b8ff".to_string()),
-        config,
-    )?;
+    let grpc =
+        YellowstoneGrpc::new_with_config(common::grpc_endpoint()?, common::grpc_token()?, config)?;
 
     let protocols = vec![
         Protocol::PancakeSwap,
@@ -107,7 +107,9 @@ async fn subscribe_arb_events() -> Result<(), Box<dyn std::error::Error>> {
     )
     .await?;
 
-    tokio::signal::ctrl_c().await?;
+    let shutdown = common::wait_for_shutdown(&grpc.subscription_handle).await;
+    grpc.stop().await;
+    shutdown?;
     Ok(())
 }
 

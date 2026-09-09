@@ -28,6 +28,11 @@ impl SubscriptionHandle {
         }
     }
 
+    /// Whether the stream task has ended, including an error or panic.
+    pub fn is_finished(&self) -> bool {
+        self.stream_handle.is_finished()
+    }
+
     /// Asynchronously wait for all tasks to complete
     pub async fn join(self) -> Result<(), tokio::task::JoinError> {
         let _ = self.stream_handle.await;

@@ -1,3 +1,5 @@
+mod common;
+
 use anyhow::Result;
 use solana_sdk::signature::{Keypair, Signer};
 use solana_streamer_sdk::streaming::event_parser::common::filter::EventTypeFilter;
@@ -14,8 +16,6 @@ use tokio::time::sleep;
 const PUMPFUN_PROGRAM_ID: &str = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P";
 const RAYDIUM_CPMM_PROGRAM_ID: &str = "CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C";
 
-const GRPC_ENDPOINT: &str = "https://solana-yellowstone-grpc.publicnode.com:443";
-const API_KEY: Option<&str> = None;
 const MONITORING_DURATION_SECS: u64 = 10;
 
 /// Demonstrates dynamic subscription updates and filter changes in real-time
@@ -23,9 +23,10 @@ const MONITORING_DURATION_SECS: u64 = 10;
 async fn main() -> Result<()> {
     env_logger::init();
 
-    println!("Connecting to Yellowstone gRPC at {}", GRPC_ENDPOINT);
-    let client =
-        Arc::new(YellowstoneGrpc::new(GRPC_ENDPOINT.to_string(), API_KEY.map(|s| s.to_string()))?);
+    let endpoint = common::grpc_endpoint()?;
+    let token = common::grpc_token()?;
+    println!("Connecting to Yellowstone gRPC at {}", endpoint);
+    let client = Arc::new(YellowstoneGrpc::new(endpoint.clone(), token.clone())?);
 
     let event_counter = Arc::new(AtomicU64::new(0));
     let counter = event_counter.clone();
@@ -79,7 +80,7 @@ async fn main() -> Result<()> {
         .await
     {
         println!("Failed to create subscription: {}", e);
-        return Ok(());
+        return Err(e.into());
     }
 
     println!(
@@ -110,7 +111,7 @@ async fn main() -> Result<()> {
         .await
     {
         println!("Failed to update subscription: {}", e);
-        return Ok(());
+        return Err(e.into());
     }
 
     println!(
@@ -141,7 +142,7 @@ async fn main() -> Result<()> {
         .await
     {
         println!("Failed to update subscription: {}", e);
-        return Ok(());
+        return Err(e.into());
     }
 
     sleep(Duration::from_secs(MONITORING_DURATION_SECS)).await;
@@ -172,7 +173,7 @@ async fn main() -> Result<()> {
         .await
     {
         println!("Failed to update subscription: {}", e);
-        return Ok(());
+        return Err(e.into());
     }
 
     sleep(Duration::from_secs(MONITORING_DURATION_SECS)).await;
@@ -203,7 +204,7 @@ async fn main() -> Result<()> {
         .await
     {
         println!("Failed to update subscription: {}", e);
-        return Ok(());
+        return Err(e.into());
     }
 
     sleep(Duration::from_secs(MONITORING_DURATION_SECS)).await;
@@ -240,7 +241,7 @@ async fn main() -> Result<()> {
         .await
     {
         println!("Failed to update subscription: {}", e);
-        return Ok(());
+        return Err(e.into());
     }
 
     println!("Updated to random addresses (expecting silence), monitoring for 3s...");
@@ -277,8 +278,7 @@ async fn main() -> Result<()> {
 
     println!("\n=== Phase 7: Shutdown ===");
 
-    let shutdown_client =
-        Arc::new(YellowstoneGrpc::new(GRPC_ENDPOINT.to_string(), API_KEY.map(|s| s.to_string()))?);
+    let shutdown_client = Arc::new(YellowstoneGrpc::new(endpoint.clone(), token.clone())?);
 
     let shutdown_event_counter = Arc::new(AtomicU64::new(0));
     let shutdown_counter = shutdown_event_counter.clone();
@@ -309,7 +309,7 @@ async fn main() -> Result<()> {
         .await
     {
         println!("Failed to subscribe shutdown client: {}", e);
-        return Ok(());
+        return Err(e.into());
     }
 
     sleep(Duration::from_millis(1000)).await;
@@ -390,8 +390,7 @@ async fn main() -> Result<()> {
         Err(e) => println!("Unexpected error: {}", e),
     }
 
-    let client2 =
-        Arc::new(YellowstoneGrpc::new(GRPC_ENDPOINT.to_string(), API_KEY.map(|s| s.to_string()))?);
+    let client2 = Arc::new(YellowstoneGrpc::new(endpoint.clone(), token.clone())?);
 
     let client2_counter = Arc::new(AtomicU64::new(0));
     let counter2 = client2_counter.clone();
@@ -434,8 +433,7 @@ async fn main() -> Result<()> {
     let test_callback_advanced =
         |_event: solana_streamer_sdk::streaming::event_parser::DexEvent| {};
 
-    let client3 =
-        Arc::new(YellowstoneGrpc::new(GRPC_ENDPOINT.to_string(), API_KEY.map(|s| s.to_string()))?);
+    let client3 = Arc::new(YellowstoneGrpc::new(endpoint.clone(), token.clone())?);
 
     // First subscription should succeed
     match client3
@@ -493,8 +491,7 @@ async fn main() -> Result<()> {
     }
 
     // Test that a second client can subscribe using advanced method
-    let client4 =
-        Arc::new(YellowstoneGrpc::new(GRPC_ENDPOINT.to_string(), API_KEY.map(|s| s.to_string()))?);
+    let client4 = Arc::new(YellowstoneGrpc::new(endpoint.clone(), token.clone())?);
 
     let client4_counter = Arc::new(AtomicU64::new(0));
     let counter4 = client4_counter.clone();

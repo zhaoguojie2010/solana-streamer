@@ -1,3 +1,5 @@
+mod common;
+
 use solana_streamer_sdk::streaming::{
     event_parser::{protocols::raydium_clmm::parser::RAYDIUM_CLMM_PROGRAM_ID, DexEvent, Protocol},
     grpc::ClientConfig,
@@ -7,6 +9,7 @@ use solana_streamer_sdk::streaming::{
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    env_logger::init();
     // 初始化日志系统（可选）
     // env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
@@ -22,11 +25,8 @@ async fn subscribe_raydium_clmm_bitmap_extension() -> Result<(), Box<dyn std::er
     let mut config: ClientConfig = ClientConfig::default();
     // 启用性能监控（可选，有性能开销）
     config.enable_metrics = true;
-    let grpc = YellowstoneGrpc::new_with_config(
-        "https://solana-yellowstone-grpc.publicnode.com:443".to_string(),
-        None,
-        config,
-    )?;
+    let grpc =
+        YellowstoneGrpc::new_with_config(common::grpc_endpoint()?, common::grpc_token()?, config)?;
 
     println!("gRPC 客户端创建成功");
 
@@ -75,15 +75,10 @@ async fn subscribe_raydium_clmm_bitmap_extension() -> Result<(), Box<dyn std::er
     )
     .await?;
 
-    // 支持 stop 方法，测试代码 - 异步1000秒之后停止
-    let grpc_clone = grpc.clone();
-    tokio::spawn(async move {
-        tokio::time::sleep(std::time::Duration::from_secs(1000)).await;
-        grpc_clone.stop().await;
-    });
-
     println!("等待 Ctrl+C 停止...");
-    tokio::signal::ctrl_c().await?;
+    let shutdown = common::wait_for_shutdown(&grpc.subscription_handle).await;
+    grpc.stop().await;
+    shutdown?;
 
     Ok(())
 }
